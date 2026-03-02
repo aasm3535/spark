@@ -1,0 +1,15 @@
+# Binaries
+bin/
+*.exe
+*.test.exe
+
+# Patch files
+*.patch
+
+# Logs and temp files
+*.log
+log.txt
+temp*.txt
+
+# Go
+*.out
