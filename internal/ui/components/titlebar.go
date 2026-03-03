@@ -1,4 +1,4 @@
-package ui
+package components
 
 import (
 	"image"
@@ -24,7 +24,7 @@ const (
 	btnH           = unit.Dp(32)
 )
 
-// TitleBar holds clickable state for the three window-control buttons.
+// TitleBar is the custom borderless title bar with minimize/maximize/close buttons.
 type TitleBar struct {
 	Close    widget.Clickable
 	Minimize widget.Clickable
@@ -33,23 +33,23 @@ type TitleBar struct {
 	maximized bool
 }
 
-// Layout draws the title bar every frame and returns its dimensions.
+// Layout draws the title bar and handles window control clicks.
 func (tb *TitleBar) Layout(gtx layout.Context, th *material.Theme, w *app.Window, title string) layout.Dimensions {
 	height := gtx.Dp(TitleBarHeight)
 	width := gtx.Constraints.Max.X
 
-	// ── background ──────────────────────────────────────────────────────────
+	// Background
 	bgRect := image.Rectangle{Max: image.Pt(width, height)}
 	paint.FillShape(gtx.Ops, ColorTitleBar, clip.Rect(bgRect).Op())
 
-	// ── drag region ─────────────────────────────────────────────────────────
+	// Drag region
 	{
 		st := clip.Rect(bgRect).Push(gtx.Ops)
 		system.ActionInputOp(system.ActionMove).Add(gtx.Ops)
 		st.Pop()
 	}
 
-	// ── click handling ───────────────────────────────────────────────────────
+	// Button click handling
 	if tb.Close.Clicked(gtx) {
 		w.Perform(system.ActionClose)
 	}
@@ -66,14 +66,13 @@ func (tb *TitleBar) Layout(gtx layout.Context, th *material.Theme, w *app.Window
 		}
 	}
 
-	// ── layout: [title left] [min] [max] [close] ────────────────────────────
 	bw := gtx.Dp(btnW)
 	bh := gtx.Dp(btnH)
 	totalBtns := bw * 3
 
 	gtx.Constraints = layout.Exact(image.Pt(width, height))
 
-	// Draw title left-aligned, vertically centered
+	// Title label (left-aligned, vertically centred)
 	{
 		titleW := width - totalBtns
 		off := op.Offset(image.Pt(0, 0)).Push(gtx.Ops)
@@ -95,7 +94,7 @@ func (tb *TitleBar) Layout(gtx layout.Context, th *material.Theme, w *app.Window
 		off.Pop()
 	}
 
-	// Draw buttons on the right
+	// Window control buttons
 	btnX := width - totalBtns
 	tb.drawMinimize(gtx, btnX, 0, bw, bh)
 	tb.drawMaximize(gtx, btnX+bw, 0, bw, bh)
@@ -104,7 +103,7 @@ func (tb *TitleBar) Layout(gtx layout.Context, th *material.Theme, w *app.Window
 	return layout.Dimensions{Size: image.Pt(width, height)}
 }
 
-// ── individual button drawers ────────────────────────────────────────────────
+// ─── Button drawers ───────────────────────────────────────────────────────────
 
 func (tb *TitleBar) drawMinimize(gtx layout.Context, x, y, bw, bh int) {
 	r := image.Rectangle{Min: image.Pt(x, y), Max: image.Pt(x+bw, y+bh)}
@@ -114,7 +113,6 @@ func (tb *TitleBar) drawMinimize(gtx layout.Context, x, y, bw, bh int) {
 		paint.FillShape(gtx.Ops, ColorBtnHoverNeutral, clip.Rect(r).Op())
 	}
 
-	// Register the clickable over the exact rect
 	offSt := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
 	gtx2 := gtx
 	gtx2.Constraints = layout.Exact(image.Pt(bw, bh))
@@ -123,13 +121,10 @@ func (tb *TitleBar) drawMinimize(gtx layout.Context, x, y, bw, bh int) {
 	})
 	offSt.Pop()
 
-	// ── symbol: horizontal line (–) ─────────────────────────────────────────
-	symColor := symCol(hovered)
+	col := symCol(hovered)
 	cx := x + bw/2
 	cy := y + bh/2
-	lineW := gtx.Dp(10)
-	lineH := gtx.Dp(1)
-	drawFilledRect(gtx.Ops, cx-lineW/2, cy, lineW, lineH, symColor)
+	drawFilledRect(gtx.Ops, cx-gtx.Dp(5), cy, gtx.Dp(10), gtx.Dp(1), col)
 }
 
 func (tb *TitleBar) drawMaximize(gtx layout.Context, x, y, bw, bh int) {
@@ -148,27 +143,23 @@ func (tb *TitleBar) drawMaximize(gtx layout.Context, x, y, bw, bh int) {
 	})
 	offSt.Pop()
 
-	symColor := symCol(hovered)
+	col := symCol(hovered)
 	cx := x + bw/2
 	cy := y + bh/2
 	sz := gtx.Dp(9)
 	thick := gtx.Dp(1)
 
 	if tb.maximized {
-		// restore icon: two overlapping squares
 		off := gtx.Dp(3)
-		// back square
-		drawHollowRect(gtx.Ops, cx-sz/2+off, cy-sz/2-off+1, sz-off, sz-off, thick, symColor)
-		// front square (filled background to erase back lines)
+		drawHollowRect(gtx.Ops, cx-sz/2+off, cy-sz/2-off+1, sz-off, sz-off, thick, col)
 		paint.FillShape(gtx.Ops, ColorTitleBar,
 			clip.Rect{
 				Min: image.Pt(cx-sz/2, cy-sz/2+1),
 				Max: image.Pt(cx+sz/2-off, cy+sz/2+1),
 			}.Op())
-		drawHollowRect(gtx.Ops, cx-sz/2, cy-sz/2+1, sz-off, sz-off, thick, symColor)
+		drawHollowRect(gtx.Ops, cx-sz/2, cy-sz/2+1, sz-off, sz-off, thick, col)
 	} else {
-		// maximize icon: single square
-		drawHollowRect(gtx.Ops, cx-sz/2, cy-sz/2, sz, sz, thick, symColor)
+		drawHollowRect(gtx.Ops, cx-sz/2, cy-sz/2, sz, sz, thick, col)
 	}
 }
 
@@ -188,20 +179,18 @@ func (tb *TitleBar) drawClose(gtx layout.Context, x, y, bw, bh int) {
 	})
 	offSt.Pop()
 
-	// ── symbol: × cross ─────────────────────────────────────────────────────
-	symColor := symColClose(hovered)
+	col := symColClose(hovered)
 	cx := float32(x + bw/2)
 	cy := float32(y + bh/2)
 	half := float32(gtx.Dp(5))
 	thick := float32(gtx.Dp(1))
 
-	drawLine(gtx.Ops, cx-half, cy-half, cx+half, cy+half, thick, symColor)
-	drawLine(gtx.Ops, cx+half, cy-half, cx-half, cy+half, thick, symColor)
+	drawLine(gtx.Ops, cx-half, cy-half, cx+half, cy+half, thick, col)
+	drawLine(gtx.Ops, cx+half, cy-half, cx-half, cy+half, thick, col)
 }
 
-// ── drawing primitives ───────────────────────────────────────────────────────
+// ─── Drawing primitives ───────────────────────────────────────────────────────
 
-// drawFilledRect draws a filled rectangle.
 func drawFilledRect(ops *op.Ops, x, y, w, h int, col color.NRGBA) {
 	paint.FillShape(ops, col, clip.Rect{
 		Min: image.Pt(x, y),
@@ -209,20 +198,13 @@ func drawFilledRect(ops *op.Ops, x, y, w, h int, col color.NRGBA) {
 	}.Op())
 }
 
-// drawHollowRect draws a 4-sided border rectangle with given border thickness.
 func drawHollowRect(ops *op.Ops, x, y, w, h, thick int, col color.NRGBA) {
-	// top
 	drawFilledRect(ops, x, y, w, thick, col)
-	// bottom
 	drawFilledRect(ops, x, y+h-thick, w, thick, col)
-	// left
 	drawFilledRect(ops, x, y, thick, h, col)
-	// right
 	drawFilledRect(ops, x+w-thick, y, thick, h, col)
 }
 
-// drawLine draws an anti-aliased 1-pixel-ish line from (x1,y1) to (x2,y2)
-// using a thin rotated rectangle via clip.Path.
 func drawLine(ops *op.Ops, x1, y1, x2, y2, thick float32, col color.NRGBA) {
 	dx := x2 - x1
 	dy := y2 - y1
@@ -231,10 +213,8 @@ func drawLine(ops *op.Ops, x1, y1, x2, y2, thick float32, col color.NRGBA) {
 		return
 	}
 
-	// unit vector along the line
 	ux := dx / length
 	uy := dy / length
-	// perpendicular
 	px := -uy * (thick / 2)
 	py := ux * (thick / 2)
 
@@ -246,11 +226,10 @@ func drawLine(ops *op.Ops, x1, y1, x2, y2, thick float32, col color.NRGBA) {
 	path.LineTo(f32.Pt(x1-px, y1-py))
 	path.Close()
 
-	shape := clip.Outline{Path: path.End()}.Op()
-	paint.FillShape(ops, col, shape)
+	paint.FillShape(ops, col, clip.Outline{Path: path.End()}.Op())
 }
 
-// ── colour helpers ───────────────────────────────────────────────────────────
+// ─── Colour helpers ───────────────────────────────────────────────────────────
 
 func symCol(hovered bool) color.NRGBA {
 	if hovered {

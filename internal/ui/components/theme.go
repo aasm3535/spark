@@ -1,4 +1,4 @@
-package ui
+package components
 
 import (
 	"image/color"
@@ -23,18 +23,15 @@ var (
 	ColorText      = color.NRGBA{R: 220, G: 220, B: 230, A: 255}
 	ColorCursor    = color.NRGBA{R: 130, G: 200, B: 255, A: 220}
 
-	// Title-bar button hover backgrounds
 	ColorBtnHoverClose   = color.NRGBA{R: 196, G: 43, B: 28, A: 255}
 	ColorBtnHoverNeutral = color.NRGBA{R: 255, G: 255, B: 255, A: 18}
 
-	// Tab colors — вычисляются динамически в applyThemeColors()
 	ColorTabActiveBg   = color.NRGBA{R: 18, G: 18, B: 24, A: 255}
 	ColorTabInactiveBg = color.NRGBA{R: 22, G: 22, B: 30, A: 255}
 	ColorTabHoverBg    = color.NRGBA{R: 30, G: 30, B: 40, A: 255}
 )
 
-// blendColor смешивает цвет c с белым (если amount > 0) или чёрным (если < 0).
-// amount от -255 до 255.
+// blendColor lightens (amount > 0) or darkens (amount < 0) a colour.
 func blendColor(c color.NRGBA, amount int) color.NRGBA {
 	clamp := func(v int) uint8 {
 		if v < 0 {
@@ -53,15 +50,25 @@ func blendColor(c color.NRGBA, amount int) color.NRGBA {
 	}
 }
 
+// ResolveColor returns fallback when c is the zero value.
+func ResolveColor(c, fallback color.NRGBA) color.NRGBA {
+	if c == (color.NRGBA{}) {
+		return fallback
+	}
+	return c
+}
+
+// applyThemeColors updates the palette from a loaded config.
 func applyThemeColors(cfg *config.Config) {
 	if cfg == nil || cfg.CustomTheme == nil {
-		// Вычисляем цвета табов из дефолтной палитры
 		ColorTabActiveBg = ColorBg
 		ColorTabInactiveBg = blendColor(ColorTitleBar, -4)
 		ColorTabHoverBg = blendColor(ColorBg, 10)
 		return
 	}
+
 	t := cfg.CustomTheme
+
 	if c, err := config.ParseHexColor(t.Bg); err == nil && t.Bg != "" {
 		ColorBg = c
 	}
@@ -84,12 +91,12 @@ func applyThemeColors(cfg *config.Config) {
 		ColorBtnHoverNeutral = c
 	}
 
-	// Вычисляем цвета табов из итоговой палитры
+	// Derive tab colours from final palette.
 	ColorTabActiveBg = ColorBg
 	ColorTabInactiveBg = blendColor(ColorTitleBar, -4)
 	ColorTabHoverBg = blendColor(ColorBg, 10)
 
-	// Но если явно заданы в конфиге — перезаписываем
+	// Override with explicit values if provided.
 	if c, err := config.ParseHexColor(t.TabActiveBg); err == nil && t.TabActiveBg != "" {
 		ColorTabActiveBg = c
 	}
@@ -103,11 +110,8 @@ func applyThemeColors(cfg *config.Config) {
 
 // ─── Font descriptors ─────────────────────────────────────────────────────────
 
-// MonoFaceList is the CSS-style font-family fallback list used by the terminal.
 const MonoFaceList = "Iosevka Fixed, Go Mono, monospace"
 
-// iosevkaFile pairs embedded font bytes with the logical weight/style we want
-// to advertise to Gio's shaper.
 type iosevkaFile struct {
 	data   []byte
 	weight font.Weight
@@ -122,8 +126,8 @@ var iosevkaFiles = []iosevkaFile{
 
 // ─── Theme constructor ────────────────────────────────────────────────────────
 
-// NewTheme builds a material.Theme that uses the bundled Iosevka Fixed fonts
-// as the primary monospace face, with Go fonts as fallback.
+// NewTheme builds a material.Theme with the Iosevka Fixed font and applies
+// colours from cfg.
 func NewTheme(cfg *config.Config) *material.Theme {
 	applyThemeColors(cfg)
 
@@ -150,15 +154,12 @@ func NewTheme(cfg *config.Config) *material.Theme {
 	return th
 }
 
-// loadIosevka parses the embedded Iosevka Fixed font files and returns a
-// []font.FontFace all registered under the typeface name "Iosevka Fixed".
 func loadIosevka() []font.FontFace {
 	var faces []font.FontFace
-
 	for _, f := range iosevkaFiles {
 		parsed, err := opentype.ParseCollection(f.data)
 		if err != nil {
-			log.Printf("ui: parsing Iosevka variant: %v", err)
+			log.Printf("components: parsing Iosevka variant: %v", err)
 			continue
 		}
 		for _, face := range parsed {
@@ -172,12 +173,10 @@ func loadIosevka() []font.FontFace {
 			})
 		}
 	}
-
 	if len(faces) > 0 {
-		log.Printf("ui: loaded %d Iosevka Fixed face(s)", len(faces))
+		log.Printf("components: loaded %d Iosevka Fixed face(s)", len(faces))
 	} else {
-		log.Printf("ui: Iosevka Fixed not loaded, falling back to Go Mono")
+		log.Printf("components: Iosevka Fixed not loaded, falling back to Go Mono")
 	}
-
 	return faces
 }

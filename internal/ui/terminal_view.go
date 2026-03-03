@@ -8,6 +8,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
+	"yutug.lol/spark/internal/ui/components"
 )
 
 func (win *Window) layoutTerminal(gtx layout.Context) layout.Dimensions {
@@ -20,7 +21,7 @@ func (win *Window) layoutTerminal(gtx layout.Context) layout.Dimensions {
 		gtx.Execute(key.FocusCmd{Tag: tag})
 	}
 
-	paint.Fill(gtx.Ops, ColorBg)
+	paint.Fill(gtx.Ops, components.ColorBg)
 
 	active := win.active()
 	if active == nil {
@@ -29,7 +30,7 @@ func (win *Window) layoutTerminal(gtx layout.Context) layout.Dimensions {
 
 	snap := active.term.Snapshot()
 
-	// Handle scrollbar drag
+	// Handle scrollbar drag.
 	if d := active.scrollBar.ScrollDistance(); d != 0 {
 		total := snap.ScrollTotal + snap.Rows
 		active.scrollFraction += d * float32(total)

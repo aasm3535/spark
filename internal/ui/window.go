@@ -7,14 +7,17 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/widget/material"
 	"yutug.lol/spark/internal/config"
+	"yutug.lol/spark/internal/ui/components"
 )
 
 // Window is the top-level UI state.
 type Window struct {
-	w        *app.Window
-	theme    *material.Theme
-	titleBar TitleBar
-	renderer Renderer
+	w     *app.Window
+	theme *material.Theme
+
+	titleBar components.TitleBar
+	tabBar   components.TabBar
+	renderer components.Renderer
 
 	tabs      []*Tab
 	activeTab int
@@ -26,7 +29,7 @@ type Window struct {
 // New creates the Window and spawns the initial tab.
 func New(w *app.Window) (*Window, error) {
 	cfg, _ := config.Load()
-	th := NewTheme(cfg)
+	th := components.NewTheme(cfg)
 
 	win := &Window{
 		w:     w,
@@ -55,7 +58,7 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 
 	win.handleEvents(gtx)
 
-	paint.Fill(gtx.Ops, ColorBg)
+	paint.Fill(gtx.Ops, components.ColorBg)
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {

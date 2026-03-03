@@ -1,14 +1,14 @@
 package ui
 
 import (
-	"gioui.org/app"
 	"gioui.org/io/system"
 	"gioui.org/widget"
 	sparkpty "yutug.lol/spark/internal/pty"
 	"yutug.lol/spark/internal/terminal"
+	"yutug.lol/spark/internal/ui/components"
 )
 
-// Tab represents a single terminal session.
+// Tab represents a single terminal session with all its associated state.
 type Tab struct {
 	term           *terminal.Terminal
 	pty            sparkpty.PTY
@@ -16,11 +16,11 @@ type Tab struct {
 	scrollFraction float32
 	closed         bool
 
-	btnClick widget.Clickable
-	btnClose widget.Clickable
+	// TabState holds the clickable widgets used by TabBar.
+	State components.TabState
 }
 
-// newTab creates a new PTY session and appends it to the window.
+// newTab spawns a new PTY + terminal and appends it to the window.
 func (win *Window) newTab() error {
 	p, err := sparkpty.New(terminal.DefaultCols, terminal.DefaultRows)
 	if err != nil {
@@ -35,7 +35,7 @@ func (win *Window) newTab() error {
 	win.tabs = append(win.tabs, tab)
 	win.activeTab = len(win.tabs) - 1
 
-	// reader goroutine: PTY -> terminal buffer
+	// Feed PTY output into the terminal buffer.
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -54,7 +54,7 @@ func (win *Window) newTab() error {
 	return nil
 }
 
-// closeTab closes the tab at idx and cleans up its PTY.
+// closeTab closes the PTY at idx and removes the tab from the list.
 func (win *Window) closeTab(idx int) {
 	if idx < 0 || idx >= len(win.tabs) {
 		return
@@ -72,7 +72,7 @@ func (win *Window) closeTab(idx int) {
 	win.w.Invalidate()
 }
 
-// activeTab returns the currently active Tab.
+// active returns the currently visible Tab, or nil when there are none.
 func (win *Window) active() *Tab {
 	if len(win.tabs) == 0 {
 		return nil
@@ -80,7 +80,7 @@ func (win *Window) active() *Tab {
 	return win.tabs[win.activeTab]
 }
 
-// cleanup closes all open PTY sessions — called before exit.
+// cleanup closes every open PTY — called on window exit.
 func (win *Window) cleanup() {
 	for _, t := range win.tabs {
 		if t.pty != nil {
@@ -88,6 +88,3 @@ func (win *Window) cleanup() {
 		}
 	}
 }
-
-// ensure app is used
-var _ *app.Window

@@ -1,8 +1,7 @@
-package ui
+package components
 
 import (
 	"image"
-	"image/color"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -15,28 +14,27 @@ import (
 	"yutug.lol/spark/internal/terminal"
 )
 
-// Renderer draws the terminal screen snapshot into the current Gio frame.
+// Renderer draws a terminal snapshot into the current Gio frame.
 type Renderer struct {
-	// CellWidth / CellHeight are recomputed each frame from the font size.
 	CellWidth  int
 	CellHeight int
 }
 
-// Layout renders the terminal snapshot and returns its dimensions.
+// Layout renders all visible cells from snap and returns the total dimensions.
 func (r *Renderer) Layout(gtx layout.Context, th *material.Theme, snap terminal.Snapshot) layout.Dimensions {
 	fontSize := th.TextSize
 	monoFont := font.Font{Typeface: th.Face, Weight: font.Light}
 
-	// ── cell size estimation ───────────────────────────────────────────────
+	// ── Measure a single cell ─────────────────────────────────────────────
 	lbl := widget.Label{MaxLines: 1}
 	macro := op.Record(gtx.Ops)
 	measureGtx := gtx
 	measureGtx.Constraints.Min = image.Point{}
-	dims := lbl.Layout(measureGtx, th.Shaper, monoFont, fontSize, "X", op.CallOp{})
+	charDims := lbl.Layout(measureGtx, th.Shaper, monoFont, fontSize, "X", op.CallOp{})
 	macro.Stop()
 
 	spPx := float32(gtx.Sp(fontSize))
-	r.CellWidth = max1(dims.Size.X, 7)
+	r.CellWidth = max1(charDims.Size.X, 7)
 	r.CellHeight = max1(int(spPx*1.35), 14)
 
 	cw := r.CellWidth
@@ -48,7 +46,7 @@ func (r *Renderer) Layout(gtx layout.Context, th *material.Theme, snap terminal.
 	visCols := clamp1(maxW/cw, 1, snap.Cols)
 	visRows := clamp1(maxH/ch, 1, snap.Rows)
 
-	// ── render each visible cell ───────────────────────────────────────────
+	// ── Render each visible cell ──────────────────────────────────────────
 	for row := 0; row < visRows && row < len(snap.Screen); row++ {
 		line := snap.Screen[row]
 		for col := 0; col < visCols && col < len(line); col++ {
@@ -61,13 +59,13 @@ func (r *Renderer) Layout(gtx layout.Context, th *material.Theme, snap terminal.
 				Max: image.Pt(x+cw, y+ch),
 			}
 
-			// ── background ────────────────────────────────────────────────
-			bg := resolveColor(cell.Bg, terminal.ColorBg)
+			// Background — only paint when it differs from the default.
+			bg := ResolveColor(cell.Bg, terminal.ColorBg)
 			if bg != terminal.ColorBg {
 				paint.FillShape(gtx.Ops, bg, clip.Rect(cellRect).Op())
 			}
 
-			// ── cursor underline ──────────────────────────────────────────
+			// Cursor underline.
 			if snap.ShowCursor && row == snap.CurY && col == snap.CurX {
 				cursorRect := image.Rectangle{
 					Min: image.Pt(x, y+ch-2),
@@ -76,9 +74,9 @@ func (r *Renderer) Layout(gtx layout.Context, th *material.Theme, snap terminal.
 				paint.FillShape(gtx.Ops, ColorCursor, clip.Rect(cursorRect).Op())
 			}
 
-			// ── glyph ─────────────────────────────────────────────────────
+			// Glyph — skip blank cells.
 			if cell.Ch != 0 && cell.Ch != ' ' {
-				drawGlyph(gtx, th, monoFont, fontSize, cell, x, y, cw, ch)
+				r.drawGlyph(gtx, th, monoFont, fontSize, cell, x, y, cw, ch)
 			}
 		}
 	}
@@ -98,9 +96,9 @@ func (r *Renderer) ColsRows(widthPx, heightPx int) (cols, rows int) {
 	return
 }
 
-// ── glyph drawing ─────────────────────────────────────────────────────────────
+// ─── Glyph drawing ────────────────────────────────────────────────────────────
 
-func drawGlyph(
+func (r *Renderer) drawGlyph(
 	gtx layout.Context,
 	th *material.Theme,
 	base font.Font,
@@ -110,7 +108,7 @@ func drawGlyph(
 ) {
 	off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
 
-	// give the label up to 2 cell-widths so wide glyphs are not clipped
+	// Give the label up to 2 cell-widths so wide glyphs are not clipped.
 	gtx2 := gtx
 	gtx2.Constraints = layout.Exact(image.Pt(cw*2, ch))
 
@@ -119,9 +117,8 @@ func drawGlyph(
 		fnt.Weight = font.Bold
 	}
 
-	fg := resolveColor(cell.Fg, ColorText)
+	fg := ResolveColor(cell.Fg, ColorText)
 
-	// record the colour op so widget.Label can consume it
 	macro := op.Record(gtx2.Ops)
 	paint.ColorOp{Color: fg}.Add(gtx2.Ops)
 	colorCall := macro.Stop()
@@ -132,14 +129,7 @@ func drawGlyph(
 	off.Pop()
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-func resolveColor(c, fallback color.NRGBA) color.NRGBA {
-	if c == (color.NRGBA{}) {
-		return fallback
-	}
-	return c
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func max1(a, b int) int {
 	if a > b {
