@@ -2,7 +2,6 @@ package components
 
 import (
 	"image/color"
-	"log"
 
 	"gioui.org/font"
 	"gioui.org/font/gofont"
@@ -159,7 +158,6 @@ func loadIosevka() []font.FontFace {
 	for _, f := range iosevkaFiles {
 		parsed, err := opentype.ParseCollection(f.data)
 		if err != nil {
-			log.Printf("components: parsing Iosevka variant: %v", err)
 			continue
 		}
 		for _, face := range parsed {
@@ -172,11 +170,6 @@ func loadIosevka() []font.FontFace {
 				Face: face.Face,
 			})
 		}
-	}
-	if len(faces) > 0 {
-		log.Printf("components: loaded %d Iosevka Fixed face(s)", len(faces))
-	} else {
-		log.Printf("components: Iosevka Fixed not loaded, falling back to Go Mono")
 	}
 	return faces
 }

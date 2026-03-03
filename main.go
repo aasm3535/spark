@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	"gioui.org/app"
@@ -22,7 +21,7 @@ func main() {
 
 		win, err := ui.New(w)
 		if err != nil {
-			log.Fatalf("spark: failed to start terminal: %v", err)
+			os.Exit(1)
 		}
 		defer win.ReadyForClose()
 
@@ -31,9 +30,6 @@ func main() {
 			ev := w.Event()
 			switch e := ev.(type) {
 			case app.DestroyEvent:
-				if e.Err != nil {
-					log.Println("spark: window error:", e.Err)
-				}
 				os.Exit(0)
 			case app.FrameEvent:
 				gtx := app.NewContext(&ops, e)
