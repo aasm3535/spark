@@ -8,12 +8,14 @@ import (
 	"gioui.org/widget/material"
 	"yutug.lol/spark/internal/config"
 	"yutug.lol/spark/internal/ui/components"
+	// config is also used for BindingManager
 )
 
 // Window is the top-level UI state.
 type Window struct {
-	w     *app.Window
-	theme *material.Theme
+	w        *app.Window
+	theme    *material.Theme
+	bindings *config.BindingManager
 
 	titleBar components.TitleBar
 	tabBar   components.TabBar
@@ -32,8 +34,9 @@ func New(w *app.Window) (*Window, error) {
 	th := components.NewTheme(cfg)
 
 	win := &Window{
-		w:     w,
-		theme: th,
+		w:        w,
+		theme:    th,
+		bindings: config.NewBindingManager(cfg),
 	}
 
 	if err := win.newTab(); err != nil {

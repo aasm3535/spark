@@ -5,11 +5,13 @@ import (
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"yutug.lol/spark/internal/config"
 	"yutug.lol/spark/internal/terminal"
 )
 
 // buildFilters returns the full list of input event filters for the terminal.
-func buildFilters(tag *struct{}) []event.Filter {
+// Binding-specific filters are merged in from the BindingManager.
+func buildFilters(tag *struct{}, bm *config.BindingManager) []event.Filter {
 	ctrl := key.ModCtrl
 	shift := key.ModShift
 	alt := key.ModAlt
@@ -44,7 +46,7 @@ func buildFilters(tag *struct{}) []event.Filter {
 		key.Filter{Focus: tag, Name: key.NameTab},
 		key.Filter{Focus: tag, Name: key.NameTab, Required: shift},
 		key.Filter{Focus: tag, Name: key.NameSpace},
-		key.Filter{Focus: tag, Name: "\\", Required: ctrl},
+		key.Filter{Focus: tag, Name: `\`, Required: ctrl},
 		key.Filter{Focus: tag, Name: "]", Required: ctrl},
 		key.Filter{Focus: tag, Name: "[", Required: ctrl},
 		key.Filter{Focus: tag, Name: "-", Required: ctrl},
@@ -62,7 +64,8 @@ func buildFilters(tag *struct{}) []event.Filter {
 		key.Filter{Focus: tag, Name: "F12"},
 	}
 
-	// Ctrl+A–Z; T and W also accept Shift (tab management binds)
+	// Ctrl+A–Z; T and W also accept Shift (covered by binding manager too,
+	// but we keep them here so raw PTY passthrough still works).
 	for _, l := range []string{
 		"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
 		"N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
@@ -75,13 +78,18 @@ func buildFilters(tag *struct{}) []event.Filter {
 		}
 	}
 
+	// Merge in any extra filters required by the binding manager.
+	for _, bf := range bm.Filters(tag) {
+		f = append(f, bf)
+	}
+
 	return f
 }
 
 // handleEvents processes all pending input events for the current frame.
 func (win *Window) handleEvents(gtx layout.Context) {
 	tag := &win.inputTag
-	filters := buildFilters(tag)
+	filters := buildFilters(tag, win.bindings)
 
 	for {
 		ev, ok := gtx.Event(filters...)
@@ -113,53 +121,13 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				continue
 			}
 
-			isCtrl := e.Modifiers.Contain(key.ModCtrl)
-			isShift := e.Modifiers.Contain(key.ModShift)
-
-			// ── window-level binds ────────────────────────────────────────
-			if isCtrl && isShift {
-				switch e.Name {
-				case "T":
-					win.newTab()
-					continue
-				case "W":
-					win.closeTab(win.activeTab)
-					continue
-				}
+			// ── Check binding manager first ───────────────────────────────
+			if action := win.bindings.Resolve(e); action != config.ActionNone {
+				win.handleAction(action)
+				continue
 			}
 
-			if isCtrl && !isShift {
-				switch e.Name {
-				case key.NamePageDown:
-					win.activeTab = (win.activeTab + 1) % len(win.tabs)
-					win.w.Invalidate()
-					continue
-				case key.NamePageUp:
-					win.activeTab = (win.activeTab - 1 + len(win.tabs)) % len(win.tabs)
-					win.w.Invalidate()
-					continue
-				}
-			}
-
-			// ── scroll binds (Shift + arrow / PgUp / PgDn) ───────────────
-			if e.Modifiers == key.ModShift {
-				switch e.Name {
-				case key.NameUpArrow:
-					active.term.Scroll(1)
-					continue
-				case key.NameDownArrow:
-					active.term.Scroll(-1)
-					continue
-				case key.NamePageUp:
-					active.term.Scroll(10)
-					continue
-				case key.NamePageDown:
-					active.term.Scroll(-10)
-					continue
-				}
-			}
-
-			// ── forward everything else to the PTY ────────────────────────
+			// ── Forward everything else to the PTY ────────────────────────
 			b := terminal.KeyToBytes(e, active.term.AppCursorKeys())
 			if len(b) > 0 {
 				active.term.Scroll(-999999)
@@ -172,6 +140,49 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				active.term.Scroll(-999999)
 				active.pty.Write([]byte(e.Text)) //nolint:errcheck
 			}
+		}
+	}
+}
+
+// handleAction executes a resolved Action against the current window state.
+func (win *Window) handleAction(action config.Action) {
+	switch action {
+	case config.ActionNewTab:
+		win.newTab() //nolint:errcheck
+
+	case config.ActionCloseTab:
+		win.closeTab(win.activeTab)
+
+	case config.ActionNextTab:
+		if len(win.tabs) > 0 {
+			win.activeTab = (win.activeTab + 1) % len(win.tabs)
+			win.w.Invalidate()
+		}
+
+	case config.ActionPrevTab:
+		if len(win.tabs) > 0 {
+			win.activeTab = (win.activeTab - 1 + len(win.tabs)) % len(win.tabs)
+			win.w.Invalidate()
+		}
+
+	case config.ActionScrollUp:
+		if active := win.active(); active != nil {
+			active.term.Scroll(1)
+		}
+
+	case config.ActionScrollDown:
+		if active := win.active(); active != nil {
+			active.term.Scroll(-1)
+		}
+
+	case config.ActionScrollPageUp:
+		if active := win.active(); active != nil {
+			active.term.Scroll(10)
+		}
+
+	case config.ActionScrollPageDown:
+		if active := win.active(); active != nil {
+			active.term.Scroll(-10)
 		}
 	}
 }
