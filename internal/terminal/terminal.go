@@ -49,6 +49,10 @@ type Terminal struct {
 	altCurX, altCurY int
 	inAlt            bool
 
+	// Search
+	searchQuery   string
+	searchResults []Match
+
 	appCursorKeys bool
 
 	marginTop, marginBottom int
@@ -96,13 +100,19 @@ func (t *Terminal) makeLine(cols int) []Cell {
 
 // ─── Snapshot (for renderer) ──────────────────────────────────────────────────
 
+// SearchHighlight defines a region in the terminal to highlight.
+type SearchHighlight struct {
+	StartCol, EndCol int
+}
+
 type Snapshot struct {
-	Cols, Rows   int
-	CurX, CurY   int
-	ShowCursor   bool
-	Screen       [][]Cell
-	ScrollOffset int
-	ScrollTotal  int
+	Cols, Rows    int
+	CurX, CurY    int
+	ShowCursor    bool
+	Screen        [][]Cell
+	ScrollOffset  int
+	ScrollTotal   int
+	SearchMatches map[int][]SearchHighlight // row index -> highlights
 }
 
 // Snapshot returns a deep copy of the current screen state, safe to read
@@ -112,13 +122,14 @@ func (t *Terminal) Snapshot() Snapshot {
 	defer t.mu.Unlock()
 
 	snap := Snapshot{
-		Cols:         t.cols,
-		Rows:         t.rows,
-		CurX:         t.curX,
-		CurY:         t.curY,
-		ShowCursor:   t.showCursor,
-		ScrollOffset: t.scrollOffset,
-		ScrollTotal:  len(t.scrollback),
+		Cols:          t.cols,
+		Rows:          t.rows,
+		CurX:          t.curX,
+		CurY:          t.curY,
+		ShowCursor:    t.showCursor,
+		ScrollOffset:  t.scrollOffset,
+		ScrollTotal:   len(t.scrollback),
+		SearchMatches: make(map[int][]SearchHighlight),
 	}
 
 	if t.scrollOffset > 0 {
@@ -141,8 +152,32 @@ func (t *Terminal) Snapshot() Snapshot {
 			}
 		}
 		snap.Screen[i] = cp
+
+		// Map global match rows to visible snapshot rows
+		if len(t.searchResults) > 0 {
+			for _, m := range t.searchResults {
+				if m.Row == vIdx {
+					snap.SearchMatches[i] = append(snap.SearchMatches[i], SearchHighlight{
+						StartCol: m.Col,
+						EndCol:   m.Col + m.Len,
+					})
+				}
+			}
+		}
 	}
 	return snap
+}
+
+// SetSearch sets the active search query and computes results.
+func (t *Terminal) SetSearch(query string) {
+	// Must not hold t.mu when calling FindAll since FindAll takes the lock.
+	// But actually, we need to restructure to avoid deadlock.
+	matches := t.FindAll(query)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.searchQuery = query
+	t.searchResults = matches
 }
 
 // Scroll moves the viewport up (positive) or down (negative).

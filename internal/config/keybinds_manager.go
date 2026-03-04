@@ -19,6 +19,10 @@ const (
 	ActionScrollDown
 	ActionScrollPageUp
 	ActionScrollPageDown
+
+	// General
+	ActionCommandPalette
+	ActionFind
 )
 
 // String returns a human-readable name for the action.
@@ -40,6 +44,10 @@ func (a Action) String() string {
 		return "scroll_page_up"
 	case ActionScrollPageDown:
 		return "scroll_page_down"
+	case ActionCommandPalette:
+		return "command_palette"
+	case ActionFind:
+		return "find"
 	default:
 		return "none"
 	}
@@ -73,6 +81,8 @@ func NewBindingManager(cfg *Config) *BindingManager {
 		{kb.ScrollDown, ActionScrollDown},
 		{kb.ScrollPageUp, ActionScrollPageUp},
 		{kb.ScrollPageDown, ActionScrollPageDown},
+		{kb.CommandPalette, ActionCommandPalette},
+		{kb.Find, ActionFind},
 	}
 
 	bm := &BindingManager{}

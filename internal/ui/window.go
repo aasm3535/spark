@@ -2,6 +2,7 @@ package ui
 
 import (
 	"gioui.org/app"
+	"gioui.org/io/key"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op/paint"
@@ -20,12 +21,16 @@ type Window struct {
 	titleBar components.TitleBar
 	tabBar   components.TabBar
 	renderer components.Renderer
+	cmdPal   components.CommandPalette
+	search   components.SearchBar
 
 	tabs      []*Tab
 	activeTab int
 
-	inputTag struct{}
-	focused  bool
+	inputTag     struct{}
+	focused      bool
+	cmdActive    bool
+	searchActive bool
 }
 
 // New creates the Window and spawns the initial tab.
@@ -63,15 +68,57 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 
 	paint.Fill(gtx.Ops, components.ColorBg)
 
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return win.titleBar.Layout(gtx, win.theme, w, "spark")
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return win.titleBar.Layout(gtx, win.theme, w, "spark")
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return win.layoutTabBar(gtx)
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return win.layoutTerminal(gtx)
+				}),
+			)
 		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return win.layoutTabBar(gtx)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return win.layoutTerminal(gtx)
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			dims, res := win.cmdPal.Layout(gtx, win.theme, win.cmdActive)
+			if res.Closed || res.Submitted {
+				win.cmdActive = false
+				if res.Action != config.ActionNone {
+					win.handleAction(res.Action)
+				}
+				gtx.Execute(key.FocusCmd{Tag: &win.inputTag})
+				win.w.Invalidate()
+			}
+
+			// Layout Search bar
+			_, sRes := win.search.Layout(gtx, win.theme, win.searchActive)
+			if sRes.Closed {
+				win.searchActive = false
+				if active := win.active(); active != nil {
+					active.term.SetSearch("")
+				}
+				gtx.Execute(key.FocusCmd{Tag: &win.inputTag})
+				win.w.Invalidate()
+			}
+			if active := win.active(); active != nil {
+				if sRes.QueryChanged {
+					active.term.SetSearch(sRes.Query)
+					win.w.Invalidate()
+				}
+				if sRes.Next {
+					active.term.SearchNext()
+					win.w.Invalidate()
+				}
+				if sRes.Prev {
+					active.term.SearchPrev()
+					win.w.Invalidate()
+				}
+			}
+
+			return dims
 		}),
 	)
 }

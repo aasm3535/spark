@@ -127,6 +127,10 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				continue
 			}
 
+			if win.searchActive {
+				continue
+			}
+
 			// ── Forward everything else to the PTY ────────────────────────
 			b := terminal.KeyToBytes(e, active.term.AppCursorKeys())
 			if len(b) > 0 {
@@ -135,6 +139,9 @@ func (win *Window) handleEvents(gtx layout.Context) {
 			}
 
 		case key.EditEvent:
+			if win.searchActive {
+				continue
+			}
 			// Space is already handled via key.NameSpace in KeyToBytes.
 			if active.pty != nil && e.Text != " " {
 				active.term.Scroll(-999999)
@@ -184,5 +191,16 @@ func (win *Window) handleAction(action config.Action) {
 		if active := win.active(); active != nil {
 			active.term.Scroll(-10)
 		}
+
+	case config.ActionCommandPalette:
+		win.cmdActive = !win.cmdActive
+		if win.cmdActive {
+			win.cmdPal.Editor.SetText("")
+		}
+		win.w.Invalidate()
+
+	case config.ActionFind:
+		win.searchActive = true
+		win.w.Invalidate()
 	}
 }

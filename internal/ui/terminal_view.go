@@ -17,7 +17,7 @@ func (win *Window) layoutTerminal(gtx layout.Context) layout.Dimensions {
 	tag := &win.inputTag
 	event.Op(gtx.Ops, tag)
 
-	if !win.focused {
+	if !win.focused && !win.cmdActive && !win.searchActive {
 		gtx.Execute(key.FocusCmd{Tag: tag})
 	}
 

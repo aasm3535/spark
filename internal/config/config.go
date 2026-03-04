@@ -37,6 +37,8 @@ type ThemeColors struct {
 //
 // An empty string disables the action.
 type Keybinds struct {
+	CommandPalette string `json:"command_palette"`
+	Find           string `json:"find"`
 	// Tab management
 	NewTab   string `json:"new_tab"`
 	CloseTab string `json:"close_tab"`
@@ -53,6 +55,8 @@ type Keybinds struct {
 // DefaultKeybinds returns the built-in key bindings.
 func DefaultKeybinds() Keybinds {
 	return Keybinds{
+		CommandPalette: "Ctrl+Shift+P",
+		Find:           "Ctrl+Shift+F",
 		NewTab:         "Ctrl+Shift+T",
 		CloseTab:       "Ctrl+Shift+W",
 		NextTab:        "Ctrl+PageDown",
@@ -67,6 +71,12 @@ func DefaultKeybinds() Keybinds {
 // Merge returns a copy of d with any non-empty fields from o applied on top.
 // This lets users override only the binds they care about.
 func (d Keybinds) Merge(o Keybinds) Keybinds {
+	if o.CommandPalette != "" {
+		d.CommandPalette = o.CommandPalette
+	}
+	if o.Find != "" {
+		d.Find = o.Find
+	}
 	if o.NewTab != "" {
 		d.NewTab = o.NewTab
 	}

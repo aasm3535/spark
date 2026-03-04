@@ -16,18 +16,18 @@ import (
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
 var (
-	ColorBg        = color.NRGBA{R: 18, G: 18, B: 24, A: 255}
-	ColorTitleBar  = color.NRGBA{R: 22, G: 22, B: 30, A: 255}
-	ColorTitleText = color.NRGBA{R: 160, G: 160, B: 180, A: 255}
-	ColorText      = color.NRGBA{R: 220, G: 220, B: 230, A: 255}
-	ColorCursor    = color.NRGBA{R: 130, G: 200, B: 255, A: 220}
+	ColorBg        = color.NRGBA{R: 32, G: 32, B: 32, A: 255}
+	ColorTitleBar  = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
+	ColorTitleText = color.NRGBA{R: 170, G: 170, B: 170, A: 255}
+	ColorText      = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
+	ColorCursor    = color.NRGBA{R: 200, G: 200, B: 200, A: 220}
 
 	ColorBtnHoverClose   = color.NRGBA{R: 196, G: 43, B: 28, A: 255}
-	ColorBtnHoverNeutral = color.NRGBA{R: 255, G: 255, B: 255, A: 18}
+	ColorBtnHoverNeutral = color.NRGBA{R: 255, G: 255, B: 255, A: 25}
 
-	ColorTabActiveBg   = color.NRGBA{R: 18, G: 18, B: 24, A: 255}
-	ColorTabInactiveBg = color.NRGBA{R: 22, G: 22, B: 30, A: 255}
-	ColorTabHoverBg    = color.NRGBA{R: 30, G: 30, B: 40, A: 255}
+	ColorTabActiveBg   = color.NRGBA{R: 32, G: 32, B: 32, A: 255}
+	ColorTabInactiveBg = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
+	ColorTabHoverBg    = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
 )
 
 // blendColor lightens (amount > 0) or darkens (amount < 0) a colour.

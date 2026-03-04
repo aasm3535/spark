@@ -59,9 +59,23 @@ func (r *Renderer) Layout(gtx layout.Context, th *material.Theme, snap terminal.
 				Max: image.Pt(x+cw, y+ch),
 			}
 
-			// Background — only paint when it differs from the default.
+			// Search Highlight
+			isSearchMatch := false
+			if highlights, ok := snap.SearchMatches[row]; ok {
+				for _, h := range highlights {
+					if col >= h.StartCol && col < h.EndCol {
+						isSearchMatch = true
+						break
+					}
+				}
+			}
+
+			// Background
 			bg := ResolveColor(cell.Bg, terminal.ColorBg)
-			if bg != terminal.ColorBg {
+			if isSearchMatch {
+				// Highlight search matches with an orange/yellow background
+				paint.FillShape(gtx.Ops, blendColor(ColorTitleBar, 60), clip.Rect(cellRect).Op())
+			} else if bg != terminal.ColorBg {
 				paint.FillShape(gtx.Ops, bg, clip.Rect(cellRect).Op())
 			}
 
