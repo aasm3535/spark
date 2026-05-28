@@ -23,6 +23,7 @@ const (
 
 	ActionCopyText
 	ActionPaste
+	ActionSTT
 )
 
 // String returns a human-readable name for the action.
@@ -52,6 +53,8 @@ func (a Action) String() string {
 		return "copy_text"
 	case ActionPaste:
 		return "paste"
+	case ActionSTT:
+		return "stt"
 	default:
 		return "none"
 	}
@@ -89,6 +92,7 @@ func NewBindingManager(cfg *Config) *BindingManager {
 		{kb.Find, ActionFind},
 		{kb.CopyText, ActionCopyText},
 		{kb.Paste, ActionPaste},
+		{kb.STT, ActionSTT},
 	}
 
 	bm := &BindingManager{}

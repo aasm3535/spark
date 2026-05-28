@@ -80,34 +80,14 @@ func loadSystemFont(familyName string) []font.FontFace {
 		if err != nil {
 			continue
 		}
-		parsed, err := opentype.Parse(data)
+		facesInFile, err := opentype.ParseCollection(data)
 		if err != nil {
 			continue
 		}
-
-		weight := font.Normal
-		style := font.Regular
-		fileLower := strings.ToLower(filepath.Base(file))
-		if strings.Contains(fileLower, "bold") || strings.Contains(fileLower, "-b") || strings.Contains(fileLower, "_b") {
-			weight = font.Bold
-		} else if strings.Contains(fileLower, "light") || strings.Contains(fileLower, "-l") {
-			weight = font.Light
-		} else if strings.Contains(fileLower, "medium") || strings.Contains(fileLower, "-m") {
-			weight = font.Medium
+		for _, f := range facesInFile {
+			f.Font.Typeface = font.Typeface(familyName)
+			faces = append(faces, f)
 		}
-
-		if strings.Contains(fileLower, "italic") || strings.Contains(fileLower, "oblique") {
-			style = font.Italic
-		}
-
-		faces = append(faces, font.FontFace{
-			Font: font.Font{
-				Typeface: font.Typeface(familyName),
-				Weight:   weight,
-				Style:    style,
-			},
-			Face: parsed,
-		})
 	}
 	return faces
 }
@@ -177,46 +157,14 @@ func loadSystemFonts(cfgFontFamily string) []font.FontFace {
 	}
 
 	// Always load standard Windows fallback fonts for Emojis and symbols
-	var fallbackFaces []font.FontFace
-	fallbackFaces = append(fallbackFaces, loadSystemFont("Segoe UI Emoji")...)
-	fallbackFaces = append(fallbackFaces, loadSystemFont("Segoe UI Symbol")...)
-	fallbackFaces = append(fallbackFaces, loadSystemFont("Segoe MDL2 Assets")...)
+	faces = append(faces, loadSystemFont("Segoe UI Emoji")...)
+	faces = append(faces, loadSystemFont("Segoe UI Symbol")...)
+	faces = append(faces, loadSystemFont("Segoe MDL2 Assets")...)
 
 	// Automatically detect and load any Nerd Fonts installed on the system as fallback
 	nerdFamilies := findNerdFontFamilies()
 	for _, fam := range nerdFamilies {
-		fallbackFaces = append(fallbackFaces, loadSystemFont(fam)...)
-	}
-
-	// 1. Add the fallback fonts under their original family names
-	faces = append(faces, fallbackFaces...)
-
-	// 2. Add copies of the fallback fonts mapped to target font families (Geist Mono and user's config font).
-	// This registers them as valid fallback faces under the active font family names, allowing
-	// Gio's text shaper to query them when a character/glyph is missing in the base font.
-	targetTypefaces := []string{"Geist Mono"}
-	if cfgFontFamily != "" && !strings.Contains(strings.ToLower(cfgFontFamily), "geist mono") {
-		families := strings.Split(cfgFontFamily, ",")
-		for _, fam := range families {
-			fam = strings.TrimSpace(fam)
-			if fam != "" {
-				targetTypefaces = append(targetTypefaces, fam)
-			}
-		}
-	}
-
-	for _, target := range targetTypefaces {
-		for _, fbFace := range fallbackFaces {
-			for _, w := range []font.Weight{font.Light, font.Normal, font.Medium, font.Bold} {
-				for _, s := range []font.Style{font.Regular, font.Italic} {
-					faceCopy := fbFace
-					faceCopy.Font.Typeface = font.Typeface(target)
-					faceCopy.Font.Weight = w
-					faceCopy.Font.Style = s
-					faces = append(faces, faceCopy)
-				}
-			}
-		}
+		faces = append(faces, loadSystemFont(fam)...)
 	}
 
 	return faces

@@ -2,7 +2,10 @@ package ui
 
 import (
 	"image"
+	"image/color"
+	"time"
 
+	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -88,6 +91,11 @@ func (win *Window) layoutTerminal(gtx layout.Context) layout.Dimensions {
 			})
 		}),
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			// STT indicator overlay in bottom-left corner of the terminal
+			if win.sttRecording || win.sttTranscribing || win.sttDotAlpha > 0 {
+				layoutRecordingIndicator(gtx, win.sttRecording, win.sttTranscribing, &win.sttDotAlpha)
+				win.w.Invalidate()
+			}
 			if snap.ScrollTotal == 0 {
 				return layout.Dimensions{}
 			}
@@ -162,4 +170,92 @@ func (win *Window) layoutTerminal(gtx layout.Context) layout.Dimensions {
 			return sb.Layout(gtx, layout.Vertical, vStart, vEnd)
 		}),
 	)
+}
+
+// layoutRecordingIndicator рисует индикатор записи/транскрипции поверх терминала
+// в левом нижнем углу: красная точка + "Recording.." при записи, спиннер при транскрипции.
+func layoutRecordingIndicator(gtx layout.Context, recording, transcribing bool, dotAlpha *float32) layout.Dimensions {
+	// Позиция: нижний левый угол
+	h := gtx.Constraints.Max.Y
+
+	if recording {
+		// Плавное появление
+		if *dotAlpha < 1 {
+			*dotAlpha += 0.08
+			if *dotAlpha > 1 {
+				*dotAlpha = 1
+			}
+		}
+	} else if *dotAlpha > 0 {
+		// Плавное исчезновение
+		*dotAlpha -= 0.08
+		if *dotAlpha < 0 {
+			*dotAlpha = 0
+		}
+	}
+
+	if *dotAlpha > 0 || transcribing {
+		sizePx := gtx.Dp(unit.Dp(15))
+		offsetX := gtx.Dp(unit.Dp(12))
+		offsetY := h - gtx.Dp(unit.Dp(12)) - sizePx
+		defer op.Offset(image.Pt(offsetX, offsetY)).Push(gtx.Ops).Pop()
+
+		if transcribing {
+			gtx.Constraints = layout.Exact(image.Pt(sizePx, sizePx))
+			return drawTerminalSpinner(gtx, color.NRGBA{R: 255, G: 255, B: 255, A: 220})
+		}
+
+		// Едва заметное покачивание цвета, период 3s
+		t := float32(time.Now().UnixNano()%int64(3*time.Second)) / float32(int64(3*time.Second))
+		pulse := float32(1) - (2*t-1)*(2*t-1) // 0→1→0
+		r := uint8(230 + uint8(10*pulse))     // 230→240
+		g := uint8(55 + uint8(10*pulse))      // 55→65
+		b := uint8(55 + uint8(10*pulse))      // 55→65
+		alpha := uint8(255 * *dotAlpha)
+		dotCol := color.NRGBA{R: r, G: g, B: b, A: alpha}
+		paint.FillShape(gtx.Ops, dotCol, clip.Ellipse{
+			Min: image.Pt(0, 0),
+			Max: image.Pt(sizePx, sizePx),
+		}.Op(gtx.Ops))
+
+		return layout.Dimensions{Size: image.Pt(sizePx, sizePx)}
+	}
+
+	return layout.Dimensions{}
+}
+
+// drawTerminalSpinner рисует маленький вращающийся спиннер для overlay в терминале
+func drawTerminalSpinner(gtx layout.Context, col color.NRGBA) layout.Dimensions {
+	size := gtx.Constraints.Max.X
+	if size < 1 {
+		size = gtx.Dp(unit.Dp(28))
+	}
+	cx := float32(size) / 2
+	cy := float32(size) / 2
+	scale := float32(gtx.Dp(1)) * 1.0
+
+	now := time.Now().UnixNano()
+	period := int64(1 * time.Second)
+	angle := float32(now%period) / float32(period) * 2 * 3.14159265
+
+	trans := op.Affine(f32.Affine2D{}.Rotate(f32.Pt(cx, cy), angle)).Push(gtx.Ops)
+
+	numTicks := 8
+	for i := 0; i < numTicks; i++ {
+		tickAngle := float32(i) * 2 * 3.14159265 / float32(numTicks)
+		alpha := uint8(40 + (215 * i / numTicks))
+		tickCol := col
+		tickCol.A = alpha
+
+		st := op.Affine(f32.Affine2D{}.Rotate(f32.Pt(cx, cy), tickAngle)).Push(gtx.Ops)
+		tickW := 1.8 * scale
+		paint.FillShape(gtx.Ops, tickCol, clip.Rect{
+			Min: image.Pt(int(cx-tickW/2), int(cy-5.5*scale)),
+			Max: image.Pt(int(cx+tickW/2), int(cy-2.5*scale)),
+		}.Op())
+		st.Pop()
+	}
+
+	trans.Pop()
+	return layout.Dimensions{Size: image.Pt(size, size)}
 }

@@ -142,10 +142,12 @@ func NewTheme(cfg *config.Config) *material.Theme {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(collection))
 
+	fallbackList := ", Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, DejaVu Sans, Segoe UI Symbol, sans-serif"
+
 	if cfg != nil && cfg.FontFamily != "" {
-		th.Face = font.Typeface(cfg.FontFamily)
+		th.Face = font.Typeface(cfg.FontFamily + fallbackList)
 	} else {
-		th.Face = font.Typeface(MonoFaceList)
+		th.Face = font.Typeface(MonoFaceList + fallbackList)
 	}
 
 	if cfg != nil && cfg.FontSize > 0 {

@@ -25,9 +25,10 @@ type Sidebar struct {
 	Tabs   []*TabState
 
 	// Dragging state
-	DragTag   int
-	dragging  bool
-	dragStart float32
+	DragTag        int
+	dragging       bool
+	dragStart      float32
+	dragStartWidth unit.Dp
 }
 
 type SidebarResult struct {
@@ -36,6 +37,7 @@ type SidebarResult struct {
 	TabSwitchedTo int
 	TabClosedIdx  int
 	WidthDeltaDp  unit.Dp
+	Dragging      bool
 }
 
 // Layout рисует плоскую боковую панель
@@ -46,6 +48,8 @@ func (s *Sidebar) Layout(
 	activeIdx int,
 	titles []string,
 	descriptions []string,
+	sttRecording bool,
+	sttTranscribing bool,
 ) (layout.Dimensions, SidebarResult) {
 	res := SidebarResult{
 		TabSwitchedTo: -1,
@@ -59,11 +63,11 @@ func (s *Sidebar) Layout(
 		res.CmdPalClicked = true
 	}
 
-	width := gtx.Dp(widthDp)
 	height := gtx.Constraints.Max.Y
 
 	// Process pointer events on the drag area (6dp wide interaction area on the right edge)
 	{
+		width := gtx.Dp(widthDp)
 		dragAreaW := gtx.Dp(unit.Dp(6))
 		dragArea := image.Rect(width-dragAreaW/2, 0, width+dragAreaW/2, height)
 		stack := clip.Rect(dragArea).Push(gtx.Ops)
@@ -77,6 +81,8 @@ func (s *Sidebar) Layout(
 		Kinds:  pointer.Press | pointer.Release | pointer.Drag | pointer.Move,
 	}
 
+	widthDpVar := widthDp
+
 	for {
 		ev, ok := gtx.Event(dragFilter)
 		if !ok {
@@ -87,20 +93,29 @@ func (s *Sidebar) Layout(
 			case pointer.Press:
 				s.dragging = true
 				s.dragStart = x.Position.X
+				s.dragStartWidth = widthDp
 			case pointer.Drag:
 				if s.dragging {
 					deltaPx := x.Position.X - s.dragStart
 					deltaDp := gtx.Metric.PxToDp(int(deltaPx))
-					if deltaDp != 0 {
-						res.WidthDeltaDp = deltaDp
-						s.dragStart += float32(gtx.Dp(deltaDp))
+					targetWidth := s.dragStartWidth + deltaDp
+					if targetWidth < 120 {
+						targetWidth = 120
 					}
+					if targetWidth > 400 {
+						targetWidth = 400
+					}
+					res.WidthDeltaDp = targetWidth - widthDp
+					widthDpVar = targetWidth
 				}
 			case pointer.Release, pointer.Cancel:
 				s.dragging = false
 			}
 		}
 	}
+
+	res.Dragging = s.dragging
+	width := gtx.Dp(widthDpVar)
 
 	// Фон сайдбара (совпадает с тайтлбаром)
 	bgCol := ColorTitleBar
@@ -134,7 +149,12 @@ func (s *Sidebar) Layout(
 					desc = descriptions[i]
 				}
 				tabChildren = append(tabChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					dims, clicked, closed := s.layoutTabItem(gtx, th, tab, title, desc, isActive, i == 0)
+					isRecordingTab := isActive && sttRecording
+					isTranscribingTab := isActive && sttTranscribing
+					dims, clicked, closed := s.layoutTabItem(
+						gtx, th, tab, title, desc, isActive, i == 0,
+						isRecordingTab, isTranscribingTab,
+					)
 					if clicked {
 						res.TabSwitchedTo = i
 					}
@@ -147,22 +167,23 @@ func (s *Sidebar) Layout(
 
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, tabChildren...)
 		}),
-
-		// Кнопка "+" в самом низу для добавления новых вкладок
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{
-				Bottom: unit.Dp(8),
-				Left:   unit.Dp(8),
-				Right:  unit.Dp(8),
-			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return s.layoutFooterButton(gtx, th, &s.NewTab, "+ New Session")
-			})
-		}),
 	)
 
-	// Правая граница сайдбара (рисуется поверх вкладок)
+	// Правая граница сайдбара (рисуется поверх вкладок, кроме активной)
 	borderColor := blendColor(ColorTitleBar, 8)
-	drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), 0, gtx.Dp(unit.Dp(1)), height, borderColor)
+	tabHeight := gtx.Dp(unit.Dp(48))
+	if activeIdx >= 0 && activeIdx < len(s.Tabs) {
+		activeTabTop := activeIdx * tabHeight
+		activeTabBottom := (activeIdx + 1) * tabHeight
+		if activeTabTop > 0 {
+			drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), 0, gtx.Dp(unit.Dp(1)), activeTabTop, borderColor)
+		}
+		if activeTabBottom < height {
+			drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), activeTabBottom, gtx.Dp(unit.Dp(1)), height-activeTabBottom, borderColor)
+		}
+	} else {
+		drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), 0, gtx.Dp(unit.Dp(1)), height, borderColor)
+	}
 
 	return layout.Dimensions{Size: image.Pt(width, height)}, res
 }
@@ -176,6 +197,8 @@ func (s *Sidebar) layoutTabItem(
 	desc string,
 	isActive bool,
 	isFirst bool,
+	isRecording bool,
+	isTranscribing bool,
 ) (layout.Dimensions, bool, bool) {
 	var clicked, closed bool
 	if tab.BtnClick.Clicked(gtx) {
@@ -214,7 +237,7 @@ func (s *Sidebar) layoutTabItem(
 					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							lbl := material.Label(th, unit.Sp(12), title)
-							lbl.Font.Typeface = "Segoe UI, sans-serif"
+							lbl.Font.Typeface = "Segoe UI, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, DejaVu Sans, Segoe UI Symbol, sans-serif"
 							if isActive {
 								lbl.Color = ColorText
 								lbl.Font.Weight = font.Medium
@@ -229,8 +252,20 @@ func (s *Sidebar) layoutTabItem(
 								desc = "no activity"
 							}
 							lbl := material.Label(th, unit.Sp(9.5), desc)
-							lbl.Font.Typeface = "Segoe UI, sans-serif"
-							if strings.HasPrefix(desc, "🤖") {
+							lbl.Font.Typeface = "Segoe UI, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, DejaVu Sans, Segoe UI Symbol, sans-serif"
+							isAgent := false
+							for _, r := range []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'} {
+								if strings.HasPrefix(desc, string(r)) {
+									isAgent = true
+									break
+								}
+							}
+							if strings.Contains(desc, "Claude Code") ||
+								strings.Contains(desc, "Opencode") ||
+								strings.Contains(desc, "Pi") {
+								isAgent = true
+							}
+							if isAgent {
 								lbl.Color = ColorText
 								lbl.Font.Weight = font.Medium
 							} else {
@@ -242,7 +277,7 @@ func (s *Sidebar) layoutTabItem(
 					)
 				})
 			}),
-			// Кнопка закрытия (резервирует место, иконка рисуется при наведении)
+			// Кнопка закрытия
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layoutCloseButton(gtx, tab, isActive)
 			}),
@@ -266,34 +301,76 @@ func (s *Sidebar) layoutTabItem(
 	return dims, clicked, closed
 }
 
-// layoutFooterButton рисует плоскую кнопку "+"/"New Session"
+// layoutFooterButton рисует кнопку "+ New Session" со скруглением и бордером
 func (s *Sidebar) layoutFooterButton(gtx layout.Context, th *material.Theme, click *widget.Clickable, text string) layout.Dimensions {
-	width := gtx.Constraints.Max.X
-	height := gtx.Dp(unit.Dp(32))
-	gtx.Constraints = layout.Exact(image.Pt(width, height))
-
 	hovered := click.Hovered()
-	bgCol := color.NRGBA{R: 0, G: 0, B: 0, A: 0}
-	if hovered {
-		bgCol = ColorBtnHoverNeutral
-	}
 
+	// Measure text to get button size
+	macro := op.Record(gtx.Ops)
+	measureGtx := gtx
+	measureGtx.Constraints.Min = image.Point{}
+	lbl := material.Label(th, unit.Sp(11), text)
+	textDims := lbl.Layout(measureGtx)
+	macro.Stop()
+
+	hPad := gtx.Dp(unit.Dp(14))
+	vPad := gtx.Dp(unit.Dp(7))
+	btnW := textDims.Size.X + hPad*2
+	btnH := textDims.Size.Y + vPad*2
+
+	// Center the button within available space
+	availW := gtx.Constraints.Max.X
+	availH := gtx.Dp(unit.Dp(32))
+	offsetX := (availW - btnW) / 2
+	offsetY := (availH - btnH) / 2
+
+	// Record all visual ops (bg + border + text) so we can place them after
 	m := op.Record(gtx.Ops)
-	dims := click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			lbl := material.Label(th, unit.Sp(11), text)
-			lbl.Font.Typeface = "Segoe UI, sans-serif"
-			lbl.Color = ColorTitleText
-			if hovered {
-				lbl.Color = ColorText
-			}
-			return lbl.Layout(gtx)
-		})
-	})
+
+	// Background
+	radius := gtx.Dp(unit.Dp(4))
+	rr := clip.RRect{Rect: image.Rect(0, 0, btnW, btnH), NE: radius, NW: radius, SE: radius, SW: radius}
+
+	bgCol := blendColor(ColorTitleBar, 10)
+	if hovered {
+		bgCol = blendColor(ColorTitleBar, 22)
+	}
+	paint.FillShape(gtx.Ops, bgCol, rr.Op(gtx.Ops))
+
+	// Border
+	borderCol := blendColor(ColorTitleBar, 18)
+	paint.FillShape(gtx.Ops, borderCol, clip.Stroke{
+		Path:  rr.Path(gtx.Ops),
+		Width: float32(gtx.Dp(unit.Dp(1))),
+	}.Op())
+
+	// Text centered inside the button
+	textX := (btnW - textDims.Size.X) / 2
+	textY := (btnH - textDims.Size.Y) / 2
+	textOff := op.Offset(image.Pt(textX, textY)).Push(gtx.Ops)
+	txtLbl := material.Label(th, unit.Sp(11), text)
+	txtLbl.Color = blendColor(ColorTitleText, 40)
+	if hovered {
+		txtLbl.Color = ColorText
+	}
+	txtLbl.Layout(gtx)
+	textOff.Pop()
+
 	call := m.Stop()
 
-	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
-	call.Add(gtx.Ops)
+	// Clickable covers the button area
+	gtx2 := gtx
+	gtx2.Constraints = layout.Exact(image.Pt(btnW, btnH))
+	_ = click.Layout(gtx2, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: image.Pt(btnW, btnH)}
+	})
 
-	return dims
+	// Offset everything to center and replay visuals
+	off := op.Offset(image.Pt(offsetX, offsetY)).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	off.Pop()
+
+	return layout.Dimensions{Size: image.Pt(availW, availH)}
 }
+
+

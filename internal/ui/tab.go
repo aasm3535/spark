@@ -30,6 +30,7 @@ type Tab struct {
 
 	// AI Agent detection state
 	activeAgent      string
+	activeSubprocess string
 	lastProcessCheck time.Time
 }
 
@@ -108,7 +109,7 @@ func (win *Window) cleanup() {
 }
 
 // CheckActiveAgent scans child processes of the shell to detect active AI agents.
-// It caches the result for 1.5 seconds to preserve performance.
+// It caches both the active agent and the active subprocess names for 1.5 seconds to preserve performance.
 func (t *Tab) CheckActiveAgent() string {
 	if time.Since(t.lastProcessCheck) < 1500*time.Millisecond {
 		return t.activeAgent
@@ -118,12 +119,14 @@ func (t *Tab) CheckActiveAgent() string {
 	pid := t.pty.Pid()
 	if pid == 0 {
 		t.activeAgent = ""
+		t.activeSubprocess = ""
 		return ""
 	}
 
 	children, err := sparkpty.GetChildProcesses(pid)
 	if err != nil {
 		t.activeAgent = ""
+		t.activeSubprocess = ""
 		return ""
 	}
 
@@ -152,5 +155,45 @@ func (t *Tab) CheckActiveAgent() string {
 		t.activeAgent = ""
 	}
 
+	// Calculate active subprocess from the same snapshot
+	t.activeSubprocess = ""
+	if t.activeAgent != "" {
+		for i := len(children) - 1; i >= 0; i-- {
+			name := strings.ToLower(children[i])
+			if strings.Contains(name, "powershell") ||
+				strings.Contains(name, "cmd.exe") ||
+				strings.Contains(name, "bash") ||
+				strings.Contains(name, "zsh") ||
+				strings.Contains(name, "conhost") ||
+				strings.Contains(name, "openconsole") ||
+				strings.Contains(name, "node") ||
+				strings.Contains(name, "npm") ||
+				strings.Contains(name, "claude") ||
+				strings.Contains(name, "opencode") ||
+				strings.Contains(name, "pi") {
+				continue
+			}
+
+			clean := children[i]
+			clean = strings.TrimSuffix(clean, ".exe")
+			t.activeSubprocess = clean
+			break
+		}
+	}
+
 	return t.activeAgent
+}
+
+// GetActiveSubprocess returns the cached name of the active leaf child process executing under the shell/agent.
+func (t *Tab) GetActiveSubprocess(agent string) string {
+	t.CheckActiveAgent() // Ensure the cache is updated if needed
+	return t.activeSubprocess
+}
+
+// IsAgentWorking returns true if the agent is actively working/running.
+func (t *Tab) IsAgentWorking(agent string) bool {
+	if t.GetActiveSubprocess(agent) != "" {
+		return true
+	}
+	return t.term.IsAgentWorking(agent)
 }

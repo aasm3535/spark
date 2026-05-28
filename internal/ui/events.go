@@ -2,7 +2,13 @@ package ui
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
@@ -11,8 +17,16 @@ import (
 	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"yutug.lol/spark/internal/config"
+	"yutug.lol/spark/internal/stt"
 	"yutug.lol/spark/internal/terminal"
 )
+
+// sttResult is sent from the transcription goroutine to the main thread
+// so that all state mutations happen on a single goroutine.
+type sttResult struct {
+	text string
+	err  error
+}
 
 // buildFilters returns the full list of input event filters for the terminal.
 // Binding-specific filters are merged in from the BindingManager.
@@ -33,6 +47,7 @@ func buildFilters(tag *struct{}, bm *config.BindingManager) []event.Filter {
 		},
 		key.FocusFilter{Target: tag},
 		transfer.TargetFilter{Target: tag, Type: "text/plain"},
+		transfer.TargetFilter{Target: tag, Type: "application/text"},
 		key.Filter{Focus: tag, Name: "", Optional: ctrl | shift | alt},
 		key.Filter{Focus: tag, Name: key.NameReturn},
 		key.Filter{Focus: tag, Name: key.NameEnter},
@@ -159,7 +174,7 @@ func (win *Window) handleEvents(gtx layout.Context) {
 					row := int(e.Position.Y) / win.renderer.CellHeight
 
 					snap := active.term.Snapshot()
-					absRow := row - snap.ScrollOffset
+					absRow := snap.ScrollTotal - snap.ScrollOffset + row
 
 					switch e.Kind {
 					case pointer.Press:
@@ -187,6 +202,12 @@ func (win *Window) handleEvents(gtx layout.Context) {
 
 			if action := win.bindings.Resolve(e); action != config.ActionNone {
 				win.handleAction(gtx, action)
+				continue
+			}
+
+			// Fallback: support standard Ctrl+V for paste if not resolved
+			if e.Modifiers == key.ModCtrl && e.Name == "V" {
+				win.handleAction(gtx, config.ActionPaste)
 				continue
 			}
 
@@ -221,6 +242,12 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				data, err := io.ReadAll(rc)
 				rc.Close() //nolint:errcheck
 				if err == nil && len(data) > 0 {
+					// Normalize line endings to \r for the PTY shell input
+					text := string(data)
+					text = strings.ReplaceAll(text, "\r\n", "\r")
+					text = strings.ReplaceAll(text, "\n", "\r")
+					data = []byte(text)
+
 					active.term.Scroll(-999999)
 					if active.term.BracketedPaste() {
 						active.pty.Write([]byte("\x1b[200~")) //nolint:errcheck
@@ -231,6 +258,33 @@ func (win *Window) handleEvents(gtx layout.Context) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// processSTTResults drains the STT result channel on the main thread.
+// All state mutations (sttTranscribing, sttCancel, pty writes, toast) happen
+// here so that the transcription goroutine never touches shared state directly.
+func (win *Window) processSTTResults() {
+	for {
+		select {
+		case result := <-win.sttResultCh:
+			win.sttTranscribing = false
+			win.sttCancel = nil
+
+			if result.err != nil {
+				win.ShowToast(fmt.Sprintf("STT Error: %v", result.err))
+			} else {
+				text := strings.TrimSpace(result.text)
+				if text != "" {
+					if active := win.active(); active != nil {
+						active.pty.Write([]byte(text)) //nolint:errcheck
+					}
+				}
+			}
+			win.w.Invalidate()
+		default:
+			return
 		}
 	}
 }
@@ -292,7 +346,7 @@ func (win *Window) handleAction(gtx layout.Context, action config.Action) {
 			text := active.term.SelectedText()
 			if text != "" {
 				gtx.Execute(clipboard.WriteCmd{
-					Type: "text/plain",
+					Type: "application/text",
 					Data: io.NopCloser(bytes.NewReader([]byte(text))),
 				})
 				win.ShowToast("Copied to clipboard")
@@ -301,5 +355,71 @@ func (win *Window) handleAction(gtx layout.Context, action config.Action) {
 
 	case config.ActionPaste:
 		gtx.Execute(clipboard.ReadCmd{Tag: &win.inputTag})
+
+	case config.ActionSTT:
+		active := win.active()
+		if active == nil {
+			break
+		}
+
+		if win.sttRecording {
+			// Stop recording
+			win.sttRecording = false
+			win.sttTranscribing = true
+			win.w.Invalidate()
+
+			tempDir := os.TempDir()
+			wavPath := filepath.Join(tempDir, "spark_stt.wav")
+
+			err := win.sttRecorder.Stop(wavPath)
+			if err != nil {
+				win.sttTranscribing = false
+				win.ShowToast(fmt.Sprintf("Failed to stop recording: %v", err))
+				win.w.Invalidate()
+				break
+			}
+
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				win.sttCancel = cancel
+				defer cancel()
+
+				text, err := stt.Transcribe(ctx, win.config.STT, wavPath)
+				_ = os.Remove(wavPath) // Clean up temp file
+
+				// Send result to main thread via channel (non-blocking).
+				select {
+				case win.sttResultCh <- sttResult{text: text, err: err}:
+				default:
+				}
+
+				// Trigger a frame so the main thread processes the result.
+				win.w.Invalidate()
+			}()
+		} else if win.sttTranscribing {
+			// Cancel ongoing transcription
+			if win.sttCancel != nil {
+				win.sttCancel()
+			}
+			win.sttTranscribing = false
+			win.ShowToast("Transcription cancelled")
+			win.w.Invalidate()
+		} else {
+			// Start recording
+			if win.config.STT.APIKey == "" {
+				win.ShowToast("STT API key is empty! Set stt.api_key in ~/.spark/config.json")
+				break
+			}
+
+			win.sttRecorder = stt.NewRecorder()
+			err := win.sttRecorder.Start()
+			if err != nil {
+				win.ShowToast(fmt.Sprintf("Failed to record: %v", err))
+				break
+			}
+
+			win.sttRecording = true
+			win.w.Invalidate()
+		}
 	}
 }

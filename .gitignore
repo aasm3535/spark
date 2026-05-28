@@ -14,3 +14,11 @@ temp*.txt
 # Go
 *.out
 nul
+
+# Temp / debug
+opencode_out.txt
+spark_stderr.txt
+
+# Unrelated projects
+.commandcode/
+ZoAPI/

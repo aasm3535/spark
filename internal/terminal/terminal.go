@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -319,14 +321,23 @@ func (t *Terminal) Write(p []byte) (int, error) {
 }
 
 func (t *Terminal) putRune(r rune) {
-	if t.curX >= t.cols {
+	w := runewidth.RuneWidth(r)
+	if w <= 0 {
+		w = 1
+	}
+
+	if t.curX+w > t.cols {
 		if t.lineWrap {
 			t.curX = 0
 			t.newline()
 		} else {
-			t.curX = t.cols - 1
+			t.curX = t.cols - w
+			if t.curX < 0 {
+				t.curX = 0
+			}
 		}
 	}
+
 	if t.curY >= 0 && t.curY < t.rows && t.curX >= 0 && t.curX < t.cols {
 		t.screen[t.curY][t.curX] = Cell{
 			Ch:   r,
@@ -334,8 +345,16 @@ func (t *Terminal) putRune(r rune) {
 			Bg:   t.bgColor,
 			Bold: t.bold,
 		}
+		if w == 2 && t.curX+1 < t.cols {
+			t.screen[t.curY][t.curX+1] = Cell{
+				Ch:   0, // dummy char representing the right half of double-width character
+				Fg:   t.fgColor,
+				Bg:   t.bgColor,
+				Bold: t.bold,
+			}
+		}
 	}
-	t.curX++
+	t.curX += w
 }
 
 func (t *Terminal) newline() {
@@ -527,11 +546,11 @@ func (t *Terminal) SelectedText() string {
 	for row := start.Row; row <= end.Row; row++ {
 		var line []Cell
 		vIdx := row
-		if vIdx < sbLen {
+		if vIdx >= 0 && vIdx < sbLen {
 			line = t.scrollback[vIdx]
-		} else {
+		} else if vIdx >= sbLen {
 			screenIdx := vIdx - sbLen
-			if screenIdx < len(t.screen) {
+			if screenIdx >= 0 && screenIdx < len(t.screen) {
 				line = t.screen[screenIdx]
 			}
 		}
@@ -555,6 +574,9 @@ func (t *Terminal) SelectedText() string {
 		for col := startCol; col < endCol; col++ {
 			ch := line[col].Ch
 			if ch == 0 {
+				if col > 0 && runewidth.RuneWidth(line[col-1].Ch) == 2 {
+					continue
+				}
 				ch = ' '
 			}
 			sb.WriteRune(ch)
@@ -1210,4 +1232,278 @@ func (t *Terminal) LastLine() string {
 		}
 	}
 	return ""
+}
+
+// LastPrompt scans the terminal screen from bottom to top and returns the last
+// user input prompt sent to the active AI agent.
+func (t *Terminal) LastPrompt(agent string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	agentLower := strings.ToLower(agent)
+	prefixes := []string{
+		agentLower + " >",
+		"claude-code >",
+		"claude >",
+		"opencode >",
+		"pi >",
+		">>>",
+		"❯",
+		"»",
+		">",
+		"$",
+		"%",
+		"?",
+	}
+
+	for r := len(t.screen) - 1; r >= 0; r-- {
+		var sb strings.Builder
+		for _, cell := range t.screen[r] {
+			if cell.Ch != 0 {
+				sb.WriteRune(cell.Ch)
+			}
+		}
+		line := sb.String()
+		trimmed := strings.TrimSpace(line)
+		lowerLine := strings.ToLower(trimmed)
+
+		// Skip typical shell prompt lines containing drive/path info
+		if strings.Contains(lowerLine, `:\`) || strings.Contains(lowerLine, `:/`) {
+			continue
+		}
+
+		for _, prefix := range prefixes {
+			if strings.Contains(lowerLine, prefix) {
+				idx := strings.Index(lowerLine, prefix)
+				promptText := line[idx+len(prefix):]
+				promptText = strings.TrimSpace(promptText)
+				promptLower := strings.ToLower(promptText)
+				if promptLower == "pi" || promptLower == "claude" || promptLower == "opencode" || promptLower == "claude-code" || promptLower == "claude-code.cmd" {
+					continue
+				}
+				if promptText != "" {
+					promptText = strings.Join(strings.Fields(promptText), " ")
+					if len(promptText) > 25 {
+						return promptText[:22] + "..."
+					}
+					return promptText
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// CurrentInputLine retrieves the text on the active input line where the cursor is currently located.
+func (t *Terminal) CurrentInputLine(agent string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.curY < 0 || t.curY >= len(t.screen) {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, cell := range t.screen[t.curY] {
+		if cell.Ch != 0 {
+			sb.WriteRune(cell.Ch)
+		}
+	}
+	line := sb.String()
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return ""
+	}
+
+	agentLower := strings.ToLower(agent)
+	prefixes := []string{
+		agentLower + " >",
+		"claude-code >",
+		"claude >",
+		"opencode >",
+		"pi >",
+		">>>",
+		"❯",
+		"»",
+		">",
+		"$",
+		"%",
+		"?",
+	}
+
+	lowerLine := strings.ToLower(trimmed)
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lowerLine, prefix) {
+			promptText := trimmed[len(prefix):]
+			promptText = strings.TrimSpace(promptText)
+			promptLower := strings.ToLower(promptText)
+			if promptLower == "pi" || promptLower == "claude" || promptLower == "opencode" || promptLower == "claude-code" || promptLower == "claude-code.cmd" {
+				return ""
+			}
+			return promptText
+		}
+	}
+
+	// Skip if it contains paths
+	if strings.Contains(lowerLine, `:\`) || strings.Contains(lowerLine, `:/`) {
+		return ""
+	}
+
+	promptLower := strings.ToLower(trimmed)
+	if promptLower == "pi" || promptLower == "claude" || promptLower == "opencode" || promptLower == "claude-code" || promptLower == "claude-code.cmd" {
+		return ""
+	}
+	return trimmed
+}
+
+// IsAgentWorking reports whether the terminal contains a running/working AI agent.
+func (t *Terminal) IsAgentWorking(agent string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	agentLower := strings.ToLower(agent)
+
+	prefixes := []string{
+		agentLower + " >",
+		"claude-code >",
+		"claude >",
+		"opencode >",
+		"pi >",
+		">>>",
+		"❯",
+		"»",
+		">",
+		"$",
+		"%",
+		"?",
+	}
+
+	// If the cursor is on a prompt line, the user is currently typing/interacting, so it's idle.
+	if t.curY >= 0 && t.curY < len(t.screen) {
+		var cursorLineBuilder strings.Builder
+		for _, cell := range t.screen[t.curY] {
+			if cell.Ch != 0 {
+				cursorLineBuilder.WriteRune(cell.Ch)
+			}
+		}
+		cursorLineLower := strings.ToLower(strings.TrimSpace(cursorLineBuilder.String()))
+
+		isPromptLine := false
+		for _, prefix := range prefixes {
+			if strings.Contains(cursorLineLower, prefix) {
+				idx := strings.Index(cursorLineLower, prefix)
+				promptText := strings.TrimSpace(cursorLineLower[idx+len(prefix):])
+				if promptText != "pi" && promptText != "claude" && promptText != "opencode" && promptText != "claude-code" && promptText != "claude-code.cmd" {
+					isPromptLine = true
+					break
+				}
+			}
+		}
+		if isPromptLine {
+			return false
+		}
+	}
+
+	// 1. Check the last few lines for known idle indicators (help bars, shortcuts, etc.)
+	idleIndicators := []string{
+		"escape interrupt",
+		"ctrl+c",
+		"ctrl+d",
+		"/ commands",
+		"clear/exit",
+		"! bash",
+		"ctrl+o",
+	}
+
+	startRow := len(t.screen) - 6
+	if startRow < 0 {
+		startRow = 0
+	}
+	for r := len(t.screen) - 1; r >= startRow; r-- {
+		var sb strings.Builder
+		for _, cell := range t.screen[r] {
+			if cell.Ch != 0 {
+				sb.WriteRune(cell.Ch)
+			}
+		}
+		lineLower := strings.ToLower(sb.String())
+		for _, indicator := range idleIndicators {
+			if strings.Contains(lineLower, indicator) {
+				return false // Definitely idle!
+			}
+		}
+	}
+
+	// 2. Find the bottom-most prompt line
+	promptRow := -1
+
+	for r := len(t.screen) - 1; r >= 0; r-- {
+		var sb strings.Builder
+		for _, cell := range t.screen[r] {
+			if cell.Ch != 0 {
+				sb.WriteRune(cell.Ch)
+			}
+		}
+		lineLower := strings.ToLower(sb.String())
+
+		// Skip shell prompts containing Windows paths
+		if strings.Contains(lineLower, `:\`) || strings.Contains(lineLower, `:/`) {
+			continue
+		}
+
+		hasPrompt := false
+		for _, prefix := range prefixes {
+			if strings.Contains(lineLower, prefix) {
+				idx := strings.Index(lineLower, prefix)
+				promptText := strings.TrimSpace(lineLower[idx+len(prefix):])
+				if promptText == "pi" || promptText == "claude" || promptText == "opencode" || promptText == "claude-code" || promptText == "claude-code.cmd" {
+					continue
+				}
+				hasPrompt = true
+				break
+			}
+		}
+		if hasPrompt {
+			promptRow = r
+			break
+		}
+	}
+
+	if promptRow == -1 {
+		// No prompt line found. If the command was just started, it might be idle.
+		return false
+	}
+
+	// 3. Check if there is any non-empty output line below the promptRow
+	hasOutputBelow := false
+	for r := promptRow + 1; r < len(t.screen); r++ {
+		var sb strings.Builder
+		for _, cell := range t.screen[r] {
+			if cell.Ch != 0 {
+				sb.WriteRune(cell.Ch)
+			}
+		}
+		trimmed := strings.TrimSpace(sb.String())
+		if trimmed != "" {
+			isStatus := false
+			trimmedLower := strings.ToLower(trimmed)
+			for _, indicator := range idleIndicators {
+				if strings.Contains(trimmedLower, indicator) {
+					isStatus = true
+					break
+				}
+			}
+			if !isStatus {
+				hasOutputBelow = true
+				break
+			}
+		}
+	}
+
+	if !hasOutputBelow {
+		// No output below the prompt, meaning the agent is waiting for input or the user is typing
+		return false
+	}
+
+	return true
 }

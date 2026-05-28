@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"image/color"
 	"time"
 
 	"gioui.org/app"
@@ -11,7 +13,13 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 	"yutug.lol/spark/internal/config"
+	"yutug.lol/spark/internal/stt"
 	"yutug.lol/spark/internal/ui/components"
+)
+
+const (
+	sidebarMinWidth unit.Dp = 120
+	sidebarMaxWidth unit.Dp = 400
 )
 
 // Window is the top-level UI state.
@@ -38,6 +46,15 @@ type Window struct {
 	searchActive  bool
 	sidebarActive bool
 	sidebarWidth  unit.Dp
+	sidebarAnimWidth float32
+	sidebarDragging  bool
+
+	sttRecorder     stt.AudioRecorder
+	sttRecording    bool
+	sttTranscribing bool
+	sttCancel       context.CancelFunc
+	sttResultCh     chan sttResult // горутина → главный поток
+	sttDotAlpha     float32        // 0→1 анимация появления точки
 }
 
 // New creates the Window and spawns the initial tab.
@@ -46,12 +63,14 @@ func New(w *app.Window) (*Window, error) {
 	th := components.NewTheme(cfg)
 
 	win := &Window{
-		w:             w,
-		theme:         th,
-		bindings:      config.NewBindingManager(cfg),
-		config:        cfg,
-		sidebarActive: true,
-		sidebarWidth:  160,
+		w:                w,
+		theme:            th,
+		bindings:         config.NewBindingManager(cfg),
+		config:           cfg,
+		sidebarActive:    true,
+		sidebarWidth:     160,
+		sidebarAnimWidth: 160,
+		sttResultCh:      make(chan sttResult, 1),
 	}
 
 	if err := win.newTab(); err != nil {
@@ -75,6 +94,7 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 	}
 
 	win.handleEvents(gtx)
+	win.processSTTResults()
 
 	paint.Fill(gtx.Ops, components.ColorBg)
 
@@ -92,20 +112,60 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if !win.sidebarActive {
+							var target float32
+							if win.sidebarActive {
+								target = float32(win.sidebarWidth)
+							} else {
+								target = 0
+							}
+
+							if win.sidebarDragging {
+								win.sidebarAnimWidth = target
+							} else {
+								diff := target - win.sidebarAnimWidth
+								if diff < -0.5 || diff > 0.5 {
+									win.sidebarAnimWidth += diff * 0.2
+									win.w.Invalidate()
+								} else {
+									win.sidebarAnimWidth = target
+								}
+							}
+
+							if win.sidebarAnimWidth <= 1 {
 								return layout.Dimensions{}
 							}
 
 							// Собираем заголовки и описания вкладок
 							titles := make([]string, len(win.tabs))
 							descriptions := make([]string, len(win.tabs))
+							anyAgentActive := false
 							for i, t := range win.tabs {
 								titles[i] = t.term.Title()
 								if agent := t.CheckActiveAgent(); agent != "" {
-									descriptions[i] = "🤖 " + agent + " (Running)"
+									isWorking := t.IsAgentWorking(agent)
+
+									var desc string
+									if isWorking {
+										anyAgentActive = true
+										spinnerFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+										frameIdx := (time.Now().UnixNano() / int64(100*time.Millisecond)) % int64(len(spinnerFrames))
+										spinner := spinnerFrames[frameIdx]
+										desc = spinner + " Working..."
+									} else {
+										currentInput := t.term.CurrentInputLine(agent)
+										if currentInput != "" {
+											desc = currentInput
+										} else {
+											desc = "idle"
+										}
+									}
+									descriptions[i] = desc
 								} else {
 									descriptions[i] = t.term.LastLine()
 								}
+							}
+							if anyAgentActive {
+								win.w.Invalidate()
 							}
 
 							// Синхронизируем вкладки в боковой панели
@@ -117,15 +177,42 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 								win.sidebar.Tabs[i] = &tab.State
 							}
 
-							dims, res := win.sidebar.Layout(gtx, win.theme, win.sidebarWidth, win.activeTab, titles, descriptions)
+							dims, res := win.sidebar.Layout(
+								gtx,
+								win.theme,
+								unit.Dp(win.sidebarAnimWidth),
+								win.activeTab,
+								titles,
+								descriptions,
+								win.sttRecording,
+								win.sttTranscribing,
+							)
+							if res.Dragging {
+								if !win.sidebarDragging {
+									win.sidebarWidth = unit.Dp(win.sidebarAnimWidth)
+									if win.sidebarWidth < sidebarMinWidth {
+										win.sidebarWidth = sidebarMinWidth
+									}
+									if win.sidebarWidth > sidebarMaxWidth {
+										win.sidebarWidth = sidebarMaxWidth
+									}
+									win.sidebarDragging = true
+								}
+							} else {
+								win.sidebarDragging = false
+							}
 							if res.WidthDeltaDp != 0 {
 								win.sidebarWidth += res.WidthDeltaDp
-								if win.sidebarWidth < 100 {
-									win.sidebarWidth = 100
+								if win.sidebarWidth < sidebarMinWidth {
+									win.sidebarWidth = sidebarMinWidth
 								}
-								if win.sidebarWidth > 400 {
-									win.sidebarWidth = 400
+								if win.sidebarWidth > sidebarMaxWidth {
+									win.sidebarWidth = sidebarMaxWidth
 								}
+								win.sidebarAnimWidth = float32(win.sidebarWidth)
+								win.w.Invalidate()
+							}
+							if win.sttTranscribing {
 								win.w.Invalidate()
 							}
 							if res.NewTabClicked {
@@ -226,3 +313,21 @@ func (win *Window) ShowToast(msg string) {
 
 // ensure system is used
 var _ = system.ActionClose
+
+func blendColor(c color.NRGBA, amount int) color.NRGBA {
+	clamp := func(v int) uint8 {
+		if v < 0 {
+			return 0
+		}
+		if v > 255 {
+			return 255
+		}
+		return uint8(v)
+	}
+	return color.NRGBA{
+		R: clamp(int(c.R) + amount),
+		G: clamp(int(c.G) + amount),
+		B: clamp(int(c.B) + amount),
+		A: c.A,
+	}
+}

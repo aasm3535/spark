@@ -49,6 +49,7 @@ type Keybinds struct {
 	ScrollPageDown string `json:"scroll_page_down"`
 	CopyText       string `json:"copy_text"`
 	Paste          string `json:"paste"`
+	STT            string `json:"stt"`
 }
 
 // DefaultKeybinds returns the built-in key bindings.
@@ -66,6 +67,7 @@ func DefaultKeybinds() Keybinds {
 		ScrollPageDown: "Shift+PageDown",
 		CopyText:       "Ctrl+Shift+C",
 		Paste:          "Ctrl+Shift+V",
+		STT:            "Ctrl+Shift+H",
 	}
 }
 
@@ -108,7 +110,18 @@ func (d Keybinds) Merge(o Keybinds) Keybinds {
 	if o.Paste != "" {
 		d.Paste = o.Paste
 	}
+	if o.STT != "" {
+		d.STT = o.STT
+	}
 	return d
+}
+
+type STTConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Provider string `json:"provider"` // "openai", "nvidia", "assemblyai"
+	APIKey   string `json:"api_key"`
+	Endpoint string `json:"endpoint,omitempty"` // custom endpoint
+	Model    string `json:"model,omitempty"`    // model name
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -121,6 +134,7 @@ type Config struct {
 	Padding     int          `json:"padding"`
 	CustomTheme *ThemeColors `json:"custom_theme,omitempty"`
 	Keybinds    Keybinds     `json:"keybinds"`
+	STT         STTConfig    `json:"stt"`
 }
 
 // DefaultConfig returns the default terminal settings.
@@ -131,6 +145,13 @@ func DefaultConfig() *Config {
 		Theme:      "default",
 		Padding:    5,
 		Keybinds:   DefaultKeybinds(),
+		STT: STTConfig{
+			Enabled:  false,
+			Provider: "openai",
+			APIKey:   "",
+			Endpoint: "",
+			Model:    "whisper-1",
+		},
 	}
 }
 

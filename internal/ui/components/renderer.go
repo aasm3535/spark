@@ -14,6 +14,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/mattn/go-runewidth"
 	"yutug.lol/spark/internal/terminal"
 )
 
@@ -697,9 +698,14 @@ func (r *Renderer) drawGlyph(
 
 	call := macro.Stop()
 
+	clipWidth := cw
+	if runewidth.RuneWidth(cell.Ch) == 2 {
+		clipWidth = cw * 2
+	}
+
 	// Apply offset, clip to cell bounds, then replay the recorded ops.
 	off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-	cl := clip.Rect(image.Rectangle{Max: image.Pt(cw, ch)}).Push(gtx.Ops)
+	cl := clip.Rect(image.Rectangle{Max: image.Pt(clipWidth, ch)}).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	cl.Pop()
 	off.Pop()

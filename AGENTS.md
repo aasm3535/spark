@@ -243,7 +243,16 @@ they want to override.
     "scroll_up":         "Shift+UpArrow",
     "scroll_down":       "Shift+DownArrow",
     "scroll_page_up":    "Shift+PageUp",
-    "scroll_page_down":  "Shift+PageDown"
+    "scroll_page_down":  "Shift+PageDown",
+    "stt":               "Ctrl+Shift+H"
+  },
+
+  "stt": {
+    "enabled": false,
+    "provider": "openai",
+    "api_key": "",
+    "endpoint": "",
+    "model": "whisper-1"
   }
 }
 ```
