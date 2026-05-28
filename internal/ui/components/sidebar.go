@@ -134,7 +134,7 @@ func (s *Sidebar) Layout(
 					desc = descriptions[i]
 				}
 				tabChildren = append(tabChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					dims, clicked, closed := s.layoutTabItem(gtx, th, tab, title, desc, isActive)
+					dims, clicked, closed := s.layoutTabItem(gtx, th, tab, title, desc, isActive, i == 0)
 					if clicked {
 						res.TabSwitchedTo = i
 					}
@@ -175,6 +175,7 @@ func (s *Sidebar) layoutTabItem(
 	title string,
 	desc string,
 	isActive bool,
+	isFirst bool,
 ) (layout.Dimensions, bool, bool) {
 	var clicked, closed bool
 	if tab.BtnClick.Clicked(gtx) {
@@ -256,7 +257,9 @@ func (s *Sidebar) layoutTabItem(
 	// Горизонтальные разделители для выделения активной вкладки
 	if isActive {
 		sepColor := blendColor(ColorTitleBar, 8)
-		drawFilledRect(gtx.Ops, 0, 0, width, gtx.Dp(unit.Dp(1)), sepColor)
+		if !isFirst {
+			drawFilledRect(gtx.Ops, 0, 0, width, gtx.Dp(unit.Dp(1)), sepColor)
+		}
 		drawFilledRect(gtx.Ops, 0, height-gtx.Dp(unit.Dp(1)), width, gtx.Dp(unit.Dp(1)), sepColor)
 	}
 
