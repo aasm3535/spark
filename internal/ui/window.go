@@ -33,9 +33,10 @@ type Window struct {
 	activeTab int
 
 	inputTag     struct{}
-	focused      bool
-	cmdActive    bool
-	searchActive bool
+	focused       bool
+	cmdActive     bool
+	searchActive  bool
+	sidebarActive bool
 }
 
 // New creates the Window and spawns the initial tab.
@@ -44,10 +45,11 @@ func New(w *app.Window) (*Window, error) {
 	th := components.NewTheme(cfg)
 
 	win := &Window{
-		w:        w,
-		theme:    th,
-		bindings: config.NewBindingManager(cfg),
-		config:   cfg,
+		w:             w,
+		theme:         th,
+		bindings:      config.NewBindingManager(cfg),
+		config:        cfg,
+		sidebarActive: true,
 	}
 
 	if err := win.newTab(); err != nil {
@@ -84,12 +86,36 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 							title = tTitle
 						}
 					}
-					return win.titleBar.Layout(gtx, win.theme, w, title)
+					dims, res := win.titleBar.Layout(gtx, win.theme, w, title)
+					if res.MenuClicked {
+						win.sidebarActive = !win.sidebarActive
+						win.w.Invalidate()
+					}
+					return dims
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							dims, res := win.sidebar.Layout(gtx, win.theme)
+							if !win.sidebarActive {
+								return layout.Dimensions{}
+							}
+
+							// Собираем заголовки вкладок
+							titles := make([]string, len(win.tabs))
+							for i, t := range win.tabs {
+								titles[i] = t.term.Title()
+							}
+
+							// Синхронизируем вкладки в боковой панели
+							for len(win.sidebar.Tabs) < len(win.tabs) {
+								win.sidebar.Tabs = append(win.sidebar.Tabs, &components.TabState{})
+							}
+							win.sidebar.Tabs = win.sidebar.Tabs[:len(win.tabs)]
+							for i, tab := range win.tabs {
+								win.sidebar.Tabs[i] = &tab.State
+							}
+
+							dims, res := win.sidebar.Layout(gtx, win.theme, win.activeTab, titles)
 							if res.NewTabClicked {
 								win.newTab() //nolint:errcheck
 							}
@@ -100,17 +126,18 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 								}
 								win.w.Invalidate()
 							}
+							if res.TabSwitchedTo != -1 {
+								win.activeTab = res.TabSwitchedTo
+								win.w.Invalidate()
+							}
+							if res.TabClosedIdx != -1 {
+								win.tabs[res.TabClosedIdx].closed = true
+								win.w.Invalidate()
+							}
 							return dims
 						}),
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return win.layoutTabBar(gtx)
-								}),
-								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-									return win.layoutTerminal(gtx)
-								}),
-							)
+							return win.layoutTerminal(gtx)
 						}),
 					)
 				}),
