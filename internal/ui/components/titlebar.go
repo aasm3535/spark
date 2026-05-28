@@ -47,13 +47,9 @@ func (tb *TitleBar) Layout(gtx layout.Context, th *material.Theme, w *app.Window
 	bgRect := image.Rectangle{Max: image.Pt(width, height)}
 	paint.FillShape(gtx.Ops, ColorTitleBar, clip.Rect(bgRect).Op())
 
-	// Тонкая нижняя граница тайтлбара (только над областью терминала)
-	borderX := 0
-	if sidebarActive {
-		borderX = gtx.Dp(unit.Dp(160))
-	}
+	// Тонкая нижняя граница тайтлбара
 	borderColor := blendColor(ColorTitleBar, 8)
-	drawFilledRect(gtx.Ops, borderX, height-gtx.Dp(unit.Dp(1)), width-borderX, gtx.Dp(unit.Dp(1)), borderColor)
+	drawFilledRect(gtx.Ops, 0, height-gtx.Dp(unit.Dp(1)), width, gtx.Dp(unit.Dp(1)), borderColor)
 
 	// Drag region (excluding the menu button at x=0..40dp)
 	{

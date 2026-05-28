@@ -66,7 +66,7 @@ func (s *Sidebar) Layout(
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// Верхний отступ вместо заголовков
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(width, gtx.Dp(unit.Dp(8)))}
+			return layout.Dimensions{Size: image.Pt(width, gtx.Dp(unit.Dp(0)))}
 		}),
 
 		// Список вкладок (плоские элементы во всю ширину)
