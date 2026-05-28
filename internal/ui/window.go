@@ -80,13 +80,7 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					title := "Spark"
-					if active := win.active(); active != nil {
-						if tTitle := active.term.Title(); tTitle != "" {
-							title = tTitle
-						}
-					}
-					dims, res := win.titleBar.Layout(gtx, win.theme, w, title, win.sidebarActive)
+					dims, res := win.titleBar.Layout(gtx, win.theme, w, "Spark", win.sidebarActive)
 					if res.MenuClicked {
 						win.sidebarActive = !win.sidebarActive
 						win.w.Invalidate()
