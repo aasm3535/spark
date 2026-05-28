@@ -6,6 +6,8 @@ import (
 	"image/color"
 
 	"gioui.org/font"
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -20,6 +22,11 @@ type Sidebar struct {
 	NewTab widget.Clickable
 	CmdPal widget.Clickable
 	Tabs   []*TabState
+
+	// Dragging state
+	DragTag   int
+	dragging  bool
+	dragStart float32
 }
 
 type SidebarResult struct {
@@ -27,12 +34,14 @@ type SidebarResult struct {
 	CmdPalClicked bool
 	TabSwitchedTo int
 	TabClosedIdx  int
+	WidthDeltaDp  unit.Dp
 }
 
 // Layout рисует плоскую боковую панель
 func (s *Sidebar) Layout(
 	gtx layout.Context,
 	th *material.Theme,
+	widthDp unit.Dp,
 	activeIdx int,
 	titles []string,
 	descriptions []string,
@@ -49,8 +58,47 @@ func (s *Sidebar) Layout(
 		res.CmdPalClicked = true
 	}
 
-	width := gtx.Dp(unit.Dp(160)) // Ширина боковой панели
+	width := gtx.Dp(widthDp)
 	height := gtx.Constraints.Max.Y
+
+	// Process pointer events on the drag area (6dp wide interaction area on the right edge)
+	{
+		dragAreaW := gtx.Dp(unit.Dp(6))
+		dragArea := image.Rect(width-dragAreaW/2, 0, width+dragAreaW/2, height)
+		defer clip.Rect(dragArea).Push(gtx.Ops).Pop()
+		event.Op(gtx.Ops, &s.DragTag)
+		pointer.CursorColResize.Add(gtx.Ops)
+	}
+
+	dragFilter := pointer.Filter{
+		Target: &s.DragTag,
+		Kinds:  pointer.Press | pointer.Release | pointer.Drag | pointer.Move,
+	}
+
+	for {
+		ev, ok := gtx.Event(dragFilter)
+		if !ok {
+			break
+		}
+		if x, ok := ev.(pointer.Event); ok {
+			switch x.Kind {
+			case pointer.Press:
+				s.dragging = true
+				s.dragStart = x.Position.X
+			case pointer.Drag:
+				if s.dragging {
+					deltaPx := x.Position.X - s.dragStart
+					deltaDp := gtx.Metric.PxToDp(int(deltaPx))
+					if deltaDp != 0 {
+						res.WidthDeltaDp = deltaDp
+						s.dragStart += float32(gtx.Dp(deltaDp))
+					}
+				}
+			case pointer.Release, pointer.Cancel:
+				s.dragging = false
+			}
+		}
+	}
 
 	// Фон сайдбара (совпадает с тайтлбаром)
 	bgCol := ColorTitleBar

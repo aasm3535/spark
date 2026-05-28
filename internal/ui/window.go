@@ -37,6 +37,7 @@ type Window struct {
 	cmdActive     bool
 	searchActive  bool
 	sidebarActive bool
+	sidebarWidth  unit.Dp
 }
 
 // New creates the Window and spawns the initial tab.
@@ -50,6 +51,7 @@ func New(w *app.Window) (*Window, error) {
 		bindings:      config.NewBindingManager(cfg),
 		config:        cfg,
 		sidebarActive: true,
+		sidebarWidth:  160,
 	}
 
 	if err := win.newTab(); err != nil {
@@ -111,7 +113,17 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 								win.sidebar.Tabs[i] = &tab.State
 							}
 
-							dims, res := win.sidebar.Layout(gtx, win.theme, win.activeTab, titles, descriptions)
+							dims, res := win.sidebar.Layout(gtx, win.theme, win.sidebarWidth, win.activeTab, titles, descriptions)
+							if res.WidthDeltaDp != 0 {
+								win.sidebarWidth += res.WidthDeltaDp
+								if win.sidebarWidth < 100 {
+									win.sidebarWidth = 100
+								}
+								if win.sidebarWidth > 400 {
+									win.sidebarWidth = 400
+								}
+								win.w.Invalidate()
+							}
 							if res.NewTabClicked {
 								win.newTab() //nolint:errcheck
 							}
