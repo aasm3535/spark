@@ -65,9 +65,10 @@ func (s *Sidebar) Layout(
 	{
 		dragAreaW := gtx.Dp(unit.Dp(6))
 		dragArea := image.Rect(width-dragAreaW/2, 0, width+dragAreaW/2, height)
-		defer clip.Rect(dragArea).Push(gtx.Ops).Pop()
+		stack := clip.Rect(dragArea).Push(gtx.Ops)
 		event.Op(gtx.Ops, &s.DragTag)
 		pointer.CursorColResize.Add(gtx.Ops)
+		stack.Pop()
 	}
 
 	dragFilter := pointer.Filter{
