@@ -56,10 +56,6 @@ func (s *Sidebar) Layout(
 	bgCol := ColorTitleBar
 	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 
-	// Правая граница сайдбара
-	borderColor := blendColor(ColorTitleBar, 8)
-	drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), 0, gtx.Dp(unit.Dp(1)), height, borderColor)
-
 	// Ограничиваем область вывода
 	defer clip.Rect{Max: image.Pt(width, height)}.Push(gtx.Ops).Pop()
 
@@ -87,20 +83,15 @@ func (s *Sidebar) Layout(
 				if i < len(descriptions) {
 					desc = descriptions[i]
 				}
-
 				tabChildren = append(tabChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{
-						Top: unit.Dp(1), // Минимальный разделитель
-					}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						dims, clicked, closed := s.layoutTabItem(gtx, th, tab, title, desc, isActive)
-						if clicked {
-							res.TabSwitchedTo = i
-						}
-						if closed {
-							res.TabClosedIdx = i
-						}
-						return dims
-					})
+					dims, clicked, closed := s.layoutTabItem(gtx, th, tab, title, desc, isActive)
+					if clicked {
+						res.TabSwitchedTo = i
+					}
+					if closed {
+						res.TabClosedIdx = i
+					}
+					return dims
 				}))
 			}
 
@@ -118,6 +109,10 @@ func (s *Sidebar) Layout(
 			})
 		}),
 	)
+
+	// Правая граница сайдбара (рисуется поверх вкладок)
+	borderColor := blendColor(ColorTitleBar, 8)
+	drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), 0, gtx.Dp(unit.Dp(1)), height, borderColor)
 
 	return layout.Dimensions{Size: image.Pt(width, height)}, res
 }
@@ -202,6 +197,10 @@ func (s *Sidebar) layoutTabItem(
 	// Рисуем плоский фон
 	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 	call.Add(gtx.Ops)
+
+	// Горизонтальный разделитель снизу вкладки
+	sepColor := blendColor(ColorTitleBar, 8)
+	drawFilledRect(gtx.Ops, 0, height-gtx.Dp(unit.Dp(1)), width, gtx.Dp(unit.Dp(1)), sepColor)
 
 	return dims, clicked, closed
 }
