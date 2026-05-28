@@ -64,18 +64,9 @@ func (s *Sidebar) Layout(
 	defer clip.Rect{Max: image.Pt(width, height)}.Push(gtx.Ops).Pop()
 
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// Кнопка "+" вверху справа для новой вкладки
+		// Верхний отступ вместо заголовков
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{
-				Top:    unit.Dp(8),
-				Bottom: unit.Dp(8),
-				Left:   unit.Dp(12),
-				Right:  unit.Dp(12),
-			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return s.layoutHeaderButton(gtx, th, &s.NewTab, "+")
-				})
-			})
+			return layout.Dimensions{Size: image.Pt(width, gtx.Dp(unit.Dp(8)))}
 		}),
 
 		// Список вкладок (плоские элементы во всю ширину)
@@ -115,6 +106,17 @@ func (s *Sidebar) Layout(
 
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, tabChildren...)
 		}),
+
+		// Кнопка "+" в самом низу для добавления новых вкладок
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Bottom: unit.Dp(8),
+				Left:   unit.Dp(8),
+				Right:  unit.Dp(8),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return s.layoutFooterButton(gtx, th, &s.NewTab, "+ New Session")
+			})
+		}),
 	)
 
 	return layout.Dimensions{Size: image.Pt(width, height)}, res
@@ -138,7 +140,7 @@ func (s *Sidebar) layoutTabItem(
 	}
 
 	width := gtx.Constraints.Max.X
-	height := gtx.Dp(unit.Dp(48)) // Увеличенная высота под 2 строки
+	height := gtx.Dp(unit.Dp(48)) // Высота под 2 строки
 	gtx.Constraints = layout.Exact(image.Pt(width, height))
 
 	// Фон вкладки
@@ -158,30 +160,36 @@ func (s *Sidebar) layoutTabItem(
 			}),
 			// Текст в два ряда (название + ласт контент)
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						lbl := material.Label(th, unit.Sp(12), title)
-						lbl.Font.Typeface = "Segoe UI, sans-serif"
-						if isActive {
-							lbl.Color = ColorText
-							lbl.Font.Weight = font.Medium
-						} else {
-							lbl.Color = ColorTitleText
-						}
-						lbl.MaxLines = 1
-						return lbl.Layout(gtx)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if desc == "" {
-							desc = "no activity"
-						}
-						lbl := material.Label(th, unit.Sp(9.5), desc)
-						lbl.Font.Typeface = "Segoe UI, sans-serif"
-						lbl.Color = blendColor(ColorTitleText, -30)
-						lbl.MaxLines = 1
-						return lbl.Layout(gtx)
-					}),
-				)
+				// РЕГУЛИРОВКА ВЕРТИКАЛЬНОГО СМЕЩЕНИЯ ТЕКСТА
+				// Изменяйте это значение (например: -2, 0, 2), чтобы сдвинуть текст по Y
+				visualTuningY := unit.Dp(0)
+
+				return layout.Inset{Top: visualTuningY}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							lbl := material.Label(th, unit.Sp(12), title)
+							lbl.Font.Typeface = "Segoe UI, sans-serif"
+							if isActive {
+								lbl.Color = ColorText
+								lbl.Font.Weight = font.Medium
+							} else {
+								lbl.Color = ColorTitleText
+							}
+							lbl.MaxLines = 1
+							return lbl.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if desc == "" {
+								desc = "no activity"
+							}
+							lbl := material.Label(th, unit.Sp(9.5), desc)
+							lbl.Font.Typeface = "Segoe UI, sans-serif"
+							lbl.Color = blendColor(ColorTitleText, -30)
+							lbl.MaxLines = 1
+							return lbl.Layout(gtx)
+						}),
+					)
+				})
 			}),
 			// Кнопка закрытия (резервирует место, иконка рисуется при наведении)
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -198,10 +206,11 @@ func (s *Sidebar) layoutTabItem(
 	return dims, clicked, closed
 }
 
-// layoutHeaderButton рисует кнопку новой вкладки "+"
-func (s *Sidebar) layoutHeaderButton(gtx layout.Context, th *material.Theme, click *widget.Clickable, text string) layout.Dimensions {
-	size := gtx.Dp(unit.Dp(24))
-	gtx.Constraints = layout.Exact(image.Pt(size, size))
+// layoutFooterButton рисует плоскую кнопку "+"/"New Session"
+func (s *Sidebar) layoutFooterButton(gtx layout.Context, th *material.Theme, click *widget.Clickable, text string) layout.Dimensions {
+	width := gtx.Constraints.Max.X
+	height := gtx.Dp(unit.Dp(32))
+	gtx.Constraints = layout.Exact(image.Pt(width, height))
 
 	hovered := click.Hovered()
 	bgCol := color.NRGBA{R: 0, G: 0, B: 0, A: 0}
@@ -212,7 +221,8 @@ func (s *Sidebar) layoutHeaderButton(gtx layout.Context, th *material.Theme, cli
 	m := op.Record(gtx.Ops)
 	dims := click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			lbl := material.Label(th, unit.Sp(14), text)
+			lbl := material.Label(th, unit.Sp(11), text)
+			lbl.Font.Typeface = "Segoe UI, sans-serif"
 			lbl.Color = ColorTitleText
 			if hovered {
 				lbl.Color = ColorText
@@ -222,7 +232,7 @@ func (s *Sidebar) layoutHeaderButton(gtx layout.Context, th *material.Theme, cli
 	})
 	call := m.Stop()
 
-	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(size, size)}.Op())
+	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 	call.Add(gtx.Ops)
 
 	return dims
