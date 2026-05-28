@@ -1,130 +1,88 @@
 # spark
 
-A custom terminal emulator with sidebar and AI agent detection, built with [Gio](https://gioui.org).
+A minimal, hackable terminal emulator with a sidebar and AI awareness. Built with [Gio](https://gioui.org).
 
-## Features
+---
 
-- ConPTY backend on Windows (PowerShell / cmd.exe)
-- Unix PTY backend on Linux and WSL ($SHELL / bash)
-- ANSI / VT100 color and attribute support (16, 256, truecolor)
-- Custom borderless window with native-style controls
-- Sidebar with vertical tab list, resizable via drag (120--400 dp)
-- AI agent detection: shows working/idle state for Claude Code, Opencode, Pi
-- Speech-to-Text transcription via OpenAI Whisper, Nvidia NIM, or AssemblyAI
-- Embedded Geist Mono font with automatic Nerd Font fallback
-- Full keyboard support: Ctrl+A--Z, F1--F12, arrows, etc.
-- Multiple tabs (Ctrl+Shift+T / Ctrl+Shift+W)
-- Text selection, copy/paste, search (Ctrl+Shift+F)
-- Command palette (Ctrl+Shift+P)
-- Configurable keybinds and theme via `~/.spark/config.json`
+**Sidebar tabs** with live AI agent status, **speech-to-text** input, **search**, **command palette**, full **truecolor** support, and everything configurable through a single JSON file.
 
-## Requirements
+---
 
-**Windows** -- Windows 10 1809 or later, Go 1.22+
-
-**Linux / WSL** -- Go 1.22+, X11 or Wayland, and the following packages:
-
-```
-sudo apt install -y libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
-```
-
-## Build
+## Quick start
 
 ```
 go build .
+./spark
 ```
 
-The binary is placed in the current directory. On Windows it will open without
-a console window automatically via the manifest embedded at build time.
+That's it. On first run spark creates `~/.spark/config.json` with sensible defaults.
 
-## Configuration
+## Keybinds
 
-spark reads `~/.spark/config.json` on startup and creates it with defaults if
-it does not exist. All fields are optional -- only specify what you want to
-change.
+| Action | Key |
+|---|---|
+| New tab | Ctrl+Shift+T |
+| Close tab | Ctrl+Shift+W |
+| Next / Prev tab | Ctrl+PageDown / PageUp |
+| Scroll | Shift+Up / Down |
+| Scroll page | Shift+PageUp / PageDown |
+| Copy / Paste | Ctrl+Shift+C / V |
+| Find | Ctrl+Shift+F |
+| Command palette | Ctrl+Shift+P |
+| Voice input | Ctrl+Shift+H |
+| Zoom in / out | Ctrl+Scroll |
+
+All keybinds are remappable in config.
+
+## Features
+
+- Resizable sidebar with tab list (drag to resize, 120-400 dp)
+- AI agent detection -- sidebar shows working/idle state for Claude Code, Opencode, Pi
+- Speech-to-text via OpenAI Whisper, Nvidia NIM, or AssemblyAI
+- VT100/ANSI truecolor (16, 256, 24-bit), box drawing, block elements, braille
+- Embedded Geist Mono font + auto-detected Nerd Font fallback
+- Text selection, copy/paste, bracketed paste
+- Search with highlighting
+- Command palette
+- Custom borderless window with native controls
+- ConPTY (Windows) / Unix PTY (Linux, WSL)
+- Full keyboard: Ctrl+A-Z, F1-F12, arrows, etc.
+- Themed via `~/.spark/config.json` -- colors, font, padding
+
+## Config
+
+`~/.spark/config.json` -- all fields optional, override only what you need:
 
 ```json
 {
   "font_family": "Geist Mono",
   "font_size": 14,
-  "theme": "default",
   "padding": 5,
-
   "custom_theme": {
-    "bg":               "#121218",
-    "fg":               "#dcdce6",
-    "title_bar":        "#16161e",
-    "title_text":       "#a0a0b4",
-    "cursor":           "#82c8ff",
-    "btn_hover_close":  "#c42b1c",
-    "btn_hover_neutral":"#ffffff12",
-    "tab_active_bg":    "#121218",
-    "tab_inactive_bg":  "#16161e",
-    "tab_hover_bg":     "#1e1e28"
+    "bg": "#121218",
+    "fg": "#dcdce6",
+    "title_bar": "#16161e",
+    "cursor": "#82c8ff"
   },
-
-  "keybinds": {
-    "new_tab":           "Ctrl+Shift+T",
-    "close_tab":         "Ctrl+Shift+W",
-    "next_tab":          "Ctrl+PageDown",
-    "prev_tab":          "Ctrl+PageUp",
-    "scroll_up":         "Shift+UpArrow",
-    "scroll_down":       "Shift+DownArrow",
-    "scroll_page_up":    "Shift+PageUp",
-    "scroll_page_down":  "Shift+PageDown",
-    "command_palette":   "Ctrl+Shift+P",
-    "find":              "Ctrl+Shift+F",
-    "copy_text":         "Ctrl+Shift+C",
-    "paste":             "Ctrl+Shift+V",
-    "stt":               "Ctrl+Shift+H"
-  },
-
   "stt": {
-    "enabled": false,
     "provider": "openai",
     "api_key": "",
-    "endpoint": "",
     "model": "whisper-1"
   }
 }
 ```
 
-## Default keybinds
+See [AGENTS.md](AGENTS.md) for the full schema and contribution guide.
 
-| Action             | Default          |
-|--------------------|------------------|
-| New tab            | Ctrl+Shift+T     |
-| Close tab          | Ctrl+Shift+W     |
-| Next tab           | Ctrl+PageDown    |
-| Previous tab       | Ctrl+PageUp      |
-| Scroll up          | Shift+Up         |
-| Scroll down        | Shift+Down       |
-| Scroll page up     | Shift+PageUp     |
-| Scroll page down   | Shift+PageDown   |
-| Command palette    | Ctrl+Shift+P     |
-| Find               | Ctrl+Shift+F     |
-| Copy               | Ctrl+Shift+C     |
-| Paste              | Ctrl+Shift+V     |
-| Speech-to-Text     | Ctrl+Shift+H     |
+## Requirements
 
-## Project layout
+- **Windows**: 10 1809+, Go 1.22+
+- **Linux/WSL**: Go 1.22+, X11 or Wayland
 
 ```
-main.go
-internal/
-  config/         -- Config, keybind parser and binding manager
-  pty/            -- PTY interface + Windows (ConPTY) and Linux implementations
-  stt/            -- Speech-to-text recording and transcription
-  terminal/       -- VT/ANSI buffer, escape parser, key mapping
-  ui/
-    components/   -- reusable Gio components (TitleBar, Sidebar, Renderer, Theme)
-    window.go     -- root window and layout
-    events.go     -- input event handling
-    terminal_view -- terminal rendering and scroll bar
+sudo apt install -y libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
 ```
-
-See [AGENTS.md](AGENTS.md) for contribution and architecture guidelines.
 
 ## License
 
-MIT. Copyright 2026.
+MIT
