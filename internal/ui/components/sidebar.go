@@ -15,14 +15,13 @@ import (
 	"gioui.org/widget/material"
 )
 
-// Sidebar представляет вертикальную панель вкладок и кнопок управления
+// Sidebar представляет вертикальную панель вкладок без скруглений (плоский стиль)
 type Sidebar struct {
 	NewTab widget.Clickable
 	CmdPal widget.Clickable
 	Tabs   []*TabState
 }
 
-// SidebarResult возвращает события взаимодействия с боковой панелью
 type SidebarResult struct {
 	NewTabClicked bool
 	CmdPalClicked bool
@@ -30,7 +29,7 @@ type SidebarResult struct {
 	TabClosedIdx  int
 }
 
-// Layout рисует боковую панель с вертикальным списком вкладок
+// Layout рисует плоскую боковую панель
 func (s *Sidebar) Layout(
 	gtx layout.Context,
 	th *material.Theme,
@@ -49,27 +48,26 @@ func (s *Sidebar) Layout(
 		res.CmdPalClicked = true
 	}
 
-	width := gtx.Dp(unit.Dp(180)) // Ширина боковой панели
+	width := gtx.Dp(unit.Dp(160)) // Ширина сайдбара
 	height := gtx.Constraints.Max.Y
 
-	// Фоновый цвет панели (чуть темнее тайтлбара)
+	// Фон сайдбара (темнее основного фона)
 	bgCol := blendColor(ColorTitleBar, -2)
 	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 
-	// Тонкая правая граница
-	borderColor := blendColor(ColorTitleBar, 10)
+	// Правая граница сайдбара
+	borderColor := blendColor(ColorTitleBar, 8)
 	drawFilledRect(gtx.Ops, width-gtx.Dp(unit.Dp(1)), 0, gtx.Dp(unit.Dp(1)), height, borderColor)
 
-	// Ограничиваем область рисования
+	// Ограничиваем область вывода
 	defer clip.Rect{Max: image.Pt(width, height)}.Push(gtx.Ops).Pop()
 
-	// Разметка элементов
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// Заголовок секции TABS и кнопка "+"
+		// Заголовок панели с кнопкой "+"
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{
-				Top:    unit.Dp(10),
-				Bottom: unit.Dp(6),
+				Top:    unit.Dp(8),
+				Bottom: unit.Dp(8),
 				Left:   unit.Dp(12),
 				Right:  unit.Dp(8),
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -79,8 +77,8 @@ func (s *Sidebar) Layout(
 					Spacing:   layout.SpaceBetween,
 				}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						lbl := material.Label(th, unit.Sp(10), "ВКЛАДКИ")
-						lbl.Color = blendColor(ColorTitleText, -20)
+						lbl := material.Label(th, unit.Sp(10), "TABS")
+						lbl.Color = blendColor(ColorTitleText, -30)
 						lbl.Font.Weight = font.Bold
 						return lbl.Layout(gtx)
 					}),
@@ -91,7 +89,7 @@ func (s *Sidebar) Layout(
 			})
 		}),
 
-		// Вертикальный список вкладок
+		// Список вкладок (плоские элементы во всю ширину)
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			var tabChildren []layout.FlexChild
 
@@ -100,16 +98,14 @@ func (s *Sidebar) Layout(
 				tab := tab
 				isActive := i == activeIdx
 
-				title := fmt.Sprintf("Вкладка %d", i+1)
+				title := fmt.Sprintf("Tab %d", i+1)
 				if i < len(titles) && titles[i] != "" {
 					title = titles[i]
 				}
 
 				tabChildren = append(tabChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{
-						Left:  unit.Dp(8),
-						Right: unit.Dp(8),
-						Top:   unit.Dp(2),
+						Top: unit.Dp(1), // Минимальный разделитель
 					}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						dims, clicked, closed := s.layoutTabItem(gtx, th, tab, title, isActive)
 						if clicked {
@@ -126,14 +122,14 @@ func (s *Sidebar) Layout(
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, tabChildren...)
 		}),
 
-		// Нижняя кнопка вызова командной палитры
+		// Нижняя панель с кнопкой командной палитры
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{
-				Bottom: unit.Dp(10),
+				Bottom: unit.Dp(8),
 				Left:   unit.Dp(8),
 				Right:  unit.Dp(8),
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return s.layoutFooterButton(gtx, th, &s.CmdPal, "> Команды")
+				return s.layoutFooterButton(gtx, th, &s.CmdPal, "> commands")
 			})
 		}),
 	)
@@ -141,7 +137,7 @@ func (s *Sidebar) Layout(
 	return layout.Dimensions{Size: image.Pt(width, height)}, res
 }
 
-// layoutTabItem рисует одну вертикальную вкладку
+// layoutTabItem рисует плоскую вкладку (стиль без скруглений)
 func (s *Sidebar) layoutTabItem(
 	gtx layout.Context,
 	th *material.Theme,
@@ -161,7 +157,7 @@ func (s *Sidebar) layoutTabItem(
 	height := gtx.Dp(unit.Dp(32))
 	gtx.Constraints = layout.Exact(image.Pt(width, height))
 
-	// Цвета в зависимости от активности
+	// Фон вкладки
 	bgCol := color.NRGBA{R: 0, G: 0, B: 0, A: 0}
 	if isActive {
 		bgCol = ColorTabActiveBg
@@ -172,18 +168,18 @@ func (s *Sidebar) layoutTabItem(
 	m := op.Record(gtx.Ops)
 	dims := tab.BtnClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			// Индикатор активности слева
+			// Индикатор активности слева (тонкая линия 3dp)
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				w := gtx.Dp(unit.Dp(3))
 				h := gtx.Dp(unit.Dp(16))
 				if isActive {
 					drawFilledRect(gtx.Ops, 0, (height-h)/2, w, h, ColorText)
 				}
-				return layout.Dimensions{Size: image.Pt(w+gtx.Dp(unit.Dp(6)), height)}
+				return layout.Dimensions{Size: image.Pt(w+gtx.Dp(unit.Dp(8)), height)}
 			}),
-			// Название вкладки
+			// Текст вкладки
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				lbl := material.Label(th, unit.Sp(11.5), title)
+				lbl := material.Label(th, unit.Sp(11), title)
 				lbl.Font.Typeface = "Segoe UI, sans-serif"
 				if isActive {
 					lbl.Color = ColorText
@@ -194,7 +190,7 @@ func (s *Sidebar) layoutTabItem(
 				lbl.MaxLines = 1
 				return lbl.Layout(gtx)
 			}),
-			// Кнопка закрытия (показывается при наведении или активности)
+			// Кнопка закрытия
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if tab.BtnClick.Hovered() || isActive {
 					return layoutCloseButton(gtx, tab, isActive)
@@ -205,19 +201,14 @@ func (s *Sidebar) layoutTabItem(
 	})
 	call := m.Stop()
 
-	// Рисуем скругленный фон вкладки
-	rr := clip.RRect{
-		Rect: image.Rectangle{Max: image.Pt(width, height)},
-		NE:   gtx.Dp(unit.Dp(4)), NW: gtx.Dp(unit.Dp(4)),
-		SE:   gtx.Dp(unit.Dp(4)), SW: gtx.Dp(unit.Dp(4)),
-	}
-	paint.FillShape(gtx.Ops, bgCol, rr.Op(gtx.Ops))
+	// Заливаем плоский фон без скруглений
+	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 	call.Add(gtx.Ops)
 
 	return dims, clicked, closed
 }
 
-// layoutHeaderButton рисует компактную кнопку "+" в заголовке
+// layoutHeaderButton рисует плоскую кнопку "+"
 func (s *Sidebar) layoutHeaderButton(gtx layout.Context, th *material.Theme, click *widget.Clickable, text string) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(24))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
@@ -226,12 +217,6 @@ func (s *Sidebar) layoutHeaderButton(gtx layout.Context, th *material.Theme, cli
 	bgCol := color.NRGBA{R: 0, G: 0, B: 0, A: 0}
 	if hovered {
 		bgCol = ColorBtnHoverNeutral
-	}
-
-	rr := clip.RRect{
-		Rect: image.Rectangle{Max: image.Pt(size, size)},
-		NE:   gtx.Dp(unit.Dp(4)), NW: gtx.Dp(unit.Dp(4)),
-		SE:   gtx.Dp(unit.Dp(4)), SW: gtx.Dp(unit.Dp(4)),
 	}
 
 	m := op.Record(gtx.Ops)
@@ -247,13 +232,14 @@ func (s *Sidebar) layoutHeaderButton(gtx layout.Context, th *material.Theme, cli
 	})
 	call := m.Stop()
 
-	paint.FillShape(gtx.Ops, bgCol, rr.Op(gtx.Ops))
+	// Заливка фона без скруглений
+	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(size, size)}.Op())
 	call.Add(gtx.Ops)
 
 	return dims
 }
 
-// layoutFooterButton рисует нижнюю текстовую кнопку "> Команды"
+// layoutFooterButton рисует нижнюю кнопку без скруглений
 func (s *Sidebar) layoutFooterButton(gtx layout.Context, th *material.Theme, click *widget.Clickable, text string) layout.Dimensions {
 	width := gtx.Constraints.Max.X
 	height := gtx.Dp(unit.Dp(32))
@@ -265,18 +251,12 @@ func (s *Sidebar) layoutFooterButton(gtx layout.Context, th *material.Theme, cli
 		bgCol = ColorBtnHoverNeutral
 	}
 
-	rr := clip.RRect{
-		Rect: image.Rectangle{Max: image.Pt(width, height)},
-		NE:   gtx.Dp(unit.Dp(4)), NW: gtx.Dp(unit.Dp(4)),
-		SE:   gtx.Dp(unit.Dp(4)), SW: gtx.Dp(unit.Dp(4)),
-	}
-
 	m := op.Record(gtx.Ops)
 	dims := click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Left: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					lbl := material.Label(th, unit.Sp(11.5), text)
+					lbl := material.Label(th, unit.Sp(11), text)
 					lbl.Font.Typeface = "Segoe UI, sans-serif"
 					lbl.Color = ColorTitleText
 					if hovered {
@@ -289,7 +269,8 @@ func (s *Sidebar) layoutFooterButton(gtx layout.Context, th *material.Theme, cli
 	})
 	call := m.Stop()
 
-	paint.FillShape(gtx.Ops, bgCol, rr.Op(gtx.Ops))
+	// Заливка фона без скруглений
+	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 	call.Add(gtx.Ops)
 
 	return dims
