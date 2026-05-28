@@ -1,15 +1,17 @@
 package ui
 
 import (
+	"time"
+
 	"gioui.org/app"
 	"gioui.org/io/key"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"gioui.org/widget/material"
 	"yutug.lol/spark/internal/config"
 	"yutug.lol/spark/internal/ui/components"
-	// config is also used for BindingManager
 )
 
 // Window is the top-level UI state.
@@ -17,12 +19,15 @@ type Window struct {
 	w        *app.Window
 	theme    *material.Theme
 	bindings *config.BindingManager
+	config   *config.Config
 
 	titleBar components.TitleBar
+	sidebar  components.Sidebar
 	tabBar   components.TabBar
 	renderer components.Renderer
 	cmdPal   components.CommandPalette
 	search   components.SearchBar
+	toast    components.Toast
 
 	tabs      []*Tab
 	activeTab int
@@ -42,6 +47,7 @@ func New(w *app.Window) (*Window, error) {
 		w:        w,
 		theme:    th,
 		bindings: config.NewBindingManager(cfg),
+		config:   cfg,
 	}
 
 	if err := win.newTab(); err != nil {
@@ -72,13 +78,41 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return win.titleBar.Layout(gtx, win.theme, w, "spark")
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return win.layoutTabBar(gtx)
+					title := "Spark"
+					if active := win.active(); active != nil {
+						if tTitle := active.term.Title(); tTitle != "" {
+							title = tTitle
+						}
+					}
+					return win.titleBar.Layout(gtx, win.theme, w, title)
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return win.layoutTerminal(gtx)
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							dims, res := win.sidebar.Layout(gtx, win.theme)
+							if res.NewTabClicked {
+								win.newTab() //nolint:errcheck
+							}
+							if res.CmdPalClicked {
+								win.cmdActive = !win.cmdActive
+								if win.cmdActive {
+									win.cmdPal.Editor.SetText("")
+								}
+								win.w.Invalidate()
+							}
+							return dims
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return win.layoutTabBar(gtx)
+								}),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									return win.layoutTerminal(gtx)
+								}),
+							)
+						}),
+					)
 				}),
 			)
 		}),
@@ -87,13 +121,12 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 			if res.Closed || res.Submitted {
 				win.cmdActive = false
 				if res.Action != config.ActionNone {
-					win.handleAction(res.Action)
+					win.handleAction(gtx, res.Action)
 				}
 				gtx.Execute(key.FocusCmd{Tag: &win.inputTag})
 				win.w.Invalidate()
 			}
 
-			// Layout Search bar
 			_, sRes := win.search.Layout(gtx, win.theme, win.searchActive)
 			if sRes.Closed {
 				win.searchActive = false
@@ -118,6 +151,8 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 				}
 			}
 
+			win.toast.Layout(gtx, win.theme)
+
 			return dims
 		}),
 	)
@@ -126,6 +161,28 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 // ReadyForClose cleans up all PTY sessions before exit.
 func (win *Window) ReadyForClose() {
 	win.cleanup()
+}
+
+// changeFontSize adjusts the terminal font size by delta points.
+func (win *Window) changeFontSize(delta float32) {
+	newSize := float32(win.theme.TextSize) + delta
+	if newSize < 8 {
+		newSize = 8
+	}
+	if newSize > 48 {
+		newSize = 48
+	}
+	win.theme.TextSize = unit.Sp(newSize)
+	win.w.Invalidate()
+}
+
+// ShowToast displays a temporary message at the bottom of the window.
+func (win *Window) ShowToast(msg string) {
+	win.toast.Show(msg, 2*time.Second)
+	win.w.Invalidate()
+	time.AfterFunc(2*time.Second, func() {
+		win.w.Invalidate()
+	})
 }
 
 // ensure system is used
