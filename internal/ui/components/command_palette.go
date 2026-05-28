@@ -2,6 +2,7 @@ package components
 
 import (
 	"image"
+	"image/color"
 	"strings"
 
 	"gioui.org/font"
@@ -17,8 +18,9 @@ import (
 )
 
 type CommandItem struct {
-	Name   string
-	Action config.Action
+	Name     string
+	Shortcut string
+	Action   config.Action
 }
 
 // CommandPalette provides a searchable list of commands.
@@ -46,14 +48,14 @@ func (c *CommandPalette) InitDefaults() {
 		return
 	}
 	c.Items = []CommandItem{
-		{"New Tab", config.ActionNewTab},
-		{"Close Tab", config.ActionCloseTab},
-		{"Next Tab", config.ActionNextTab},
-		{"Previous Tab", config.ActionPrevTab},
-		{"Scroll Up", config.ActionScrollUp},
-		{"Scroll Down", config.ActionScrollDown},
-		{"Scroll Page Up", config.ActionScrollPageUp},
-		{"Scroll Page Down", config.ActionScrollPageDown},
+		{"New Tab", "Ctrl+Shift+T", config.ActionNewTab},
+		{"Close Tab", "Ctrl+Shift+W", config.ActionCloseTab},
+		{"Next Tab", "Ctrl+PageDown", config.ActionNextTab},
+		{"Previous Tab", "Ctrl+PageUp", config.ActionPrevTab},
+		{"Scroll Up", "Shift+Up", config.ActionScrollUp},
+		{"Scroll Down", "Shift+Down", config.ActionScrollDown},
+		{"Scroll Page Up", "Shift+PageUp", config.ActionScrollPageUp},
+		{"Scroll Page Down", "Shift+PageDown", config.ActionScrollPageDown},
 	}
 	c.List.Axis = layout.Vertical
 	c.Filtered = c.Items
@@ -162,16 +164,16 @@ func (c *CommandPalette) Layout(
 	paint.FillShape(gtx.Ops, bg, clip.Rect{Max: image.Pt(w, h)}.Op())
 
 	// Container size
-	boxW := 400
+	boxW := 480
 	if boxW > w {
-		boxW = w - 40 // simple padding
+		boxW = w - 40
 	}
 	if boxW < 100 {
 		boxW = 100
 	}
 
 	x := (w - boxW) / 2
-	y := h / 6
+	y := h / 5
 
 	off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
 
@@ -179,67 +181,135 @@ func (c *CommandPalette) Layout(
 	gtx.Constraints.Max.X = boxW
 
 	maxH := h * 2 / 3
-	if maxH < 200 {
-		maxH = 200
+	if maxH < 300 {
+		maxH = 300
 	}
 	gtx.Constraints.Max.Y = maxH
+
+	// Draw main container background
+	containerBg := ColorTitleBar
+	containerRect := image.Rectangle{Max: image.Pt(boxW, maxH)}
+	containerRR := clip.UniformRRect(containerRect, gtx.Dp(4))
+	paint.FillShape(gtx.Ops, containerBg, containerRR.Op(gtx.Ops))
+
+	// Clip content to container
+	cl := containerRR.Push(gtx.Ops)
 
 	macro := op.Record(gtx.Ops)
 	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// Search Input Area
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				ed := material.Editor(th, &c.Editor, "Type a command...")
-				ed.Color = ColorText
-				ed.HintColor = blendColor(ColorText, -100)
-				ed.Font = font.Font{Typeface: "Segoe UI, sans-serif"}
-				ed.TextSize = unit.Sp(14)
-				return ed.Layout(gtx)
+			return layout.Inset{
+				Top: unit.Dp(12), Bottom: unit.Dp(12),
+				Left: unit.Dp(16), Right: unit.Dp(16),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						lbl := material.Label(th, unit.Sp(16), "⌘")
+						lbl.Color = blendColor(ColorText, -80)
+						return layout.Inset{Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return lbl.Layout(gtx)
+						})
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						ed := material.Editor(th, &c.Editor, "")
+						ed.Color = ColorText
+						ed.HintColor = blendColor(ColorText, -120)
+						ed.Font = font.Font{Typeface: "Geist Mono, monospace"}
+						ed.TextSize = unit.Sp(14)
+						return ed.Layout(gtx)
+					}),
+				)
 			})
 		}),
 		// Separator Line
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			rect := image.Rectangle{Max: image.Pt(gtx.Constraints.Max.X, gtx.Dp(1))}
-			paint.FillShape(gtx.Ops, blendColor(ColorTitleBar, 20), clip.Rect(rect).Op())
-			return layout.Dimensions{Size: rect.Max}
+			sepColor := blendColor(ColorTitleBar, 20)
+			rect := image.Rectangle{
+				Min: image.Pt(16, 0),
+				Max: image.Pt(boxW-16, gtx.Dp(1)),
+			}
+			paint.FillShape(gtx.Ops, sepColor, clip.Rect(rect).Op())
+			return layout.Dimensions{Size: image.Pt(boxW, gtx.Dp(1))}
 		}),
 		// Command List Area
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if len(c.Filtered) == 0 {
-				return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					lbl := material.Label(th, unit.Sp(13), "No commands found.")
-					lbl.Color = blendColor(ColorText, -80)
-					return lbl.Layout(gtx)
+				return layout.Inset{
+					Top: unit.Dp(20), Bottom: unit.Dp(20),
+					Left: unit.Dp(16), Right: unit.Dp(16),
+				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					lbl := material.Label(th, unit.Sp(12), "No commands found")
+					lbl.Color = blendColor(ColorText, -100)
+					lbl.Font.Typeface = "Geist Mono, monospace"
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return lbl.Layout(gtx)
+					})
 				})
 			}
-			return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top: unit.Dp(6), Bottom: unit.Dp(6),
+				Left: unit.Dp(6), Right: unit.Dp(6),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return material.List(th, &c.List).Layout(gtx, len(c.Filtered), func(gtx layout.Context, index int) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					item := c.Filtered[index]
 
-					return layout.UniformInset(unit.Dp(2)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return layout.Stack{}.Layout(gtx,
 							layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 								if index == c.ActiveIndex {
-									rr := clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, gtx.Dp(6))
-									paint.FillShape(gtx.Ops, ColorTabHoverBg, rr.Op(gtx.Ops))
+									hoverBg := ColorTabHoverBg
+									rr := clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, gtx.Dp(3))
+									paint.FillShape(gtx.Ops, hoverBg, rr.Op(gtx.Ops))
 								}
 								return layout.Dimensions{Size: gtx.Constraints.Min}
 							}),
 							layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 								return layout.Inset{
-									Top: unit.Dp(4), Bottom: unit.Dp(4),
-									Left: unit.Dp(8), Right: unit.Dp(8),
+									Top: unit.Dp(8), Bottom: unit.Dp(8),
+									Left: unit.Dp(10), Right: unit.Dp(10),
 								}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									lbl := material.Label(th, unit.Sp(13), item.Name)
-									lbl.Font.Typeface = "Segoe UI, sans-serif"
-									if index == c.ActiveIndex {
-										lbl.Color = ColorText
-										lbl.Font.Weight = font.Bold
-									} else {
-										lbl.Color = blendColor(ColorText, -40)
-									}
-									return lbl.Layout(gtx)
+									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										// Name
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											lbl := material.Label(th, unit.Sp(13), item.Name)
+											lbl.Font.Typeface = "Geist Mono, monospace"
+											if index == c.ActiveIndex {
+												lbl.Color = ColorText
+											} else {
+												lbl.Color = blendColor(ColorText, -50)
+											}
+											return lbl.Layout(gtx)
+										}),
+										// Shortcut
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if item.Shortcut == "" {
+												return layout.Dimensions{}
+											}
+											return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												return layout.Stack{}.Layout(gtx,
+													layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+														bg := blendColor(ColorTitleBar, 15)
+														rr := clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, gtx.Dp(2))
+														paint.FillShape(gtx.Ops, bg, rr.Op(gtx.Ops))
+														return layout.Dimensions{Size: gtx.Constraints.Min}
+													}),
+													layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+														return layout.Inset{
+															Top: unit.Dp(3), Bottom: unit.Dp(3),
+															Left: unit.Dp(6), Right: unit.Dp(6),
+														}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+															lbl := material.Label(th, unit.Sp(10), item.Shortcut)
+															lbl.Color = blendColor(ColorText, -80)
+															lbl.Font.Typeface = "Geist Mono, monospace"
+															return lbl.Layout(gtx)
+														})
+													}),
+												)
+											})
+										}),
+									)
 								})
 							}),
 						)
@@ -250,23 +320,18 @@ func (c *CommandPalette) Layout(
 	)
 	call := macro.Stop()
 
-	// Draw Background Box with rounded corners
-	rect := image.Rectangle{Max: dims.Size}
-	rr := clip.UniformRRect(rect, gtx.Dp(8))
-
-	paint.FillShape(gtx.Ops, ColorTitleBar, rr.Op(gtx.Ops))
-
-	cl := rr.Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	cl.Pop()
 
-	// Draw Border
-	paint.FillShape(gtx.Ops, blendColor(ColorTitleBar, 30), clip.Stroke{
-		Path:  rr.Path(gtx.Ops),
-		Width: float32(gtx.Dp(1)),
+	// Draw border
+	borderColor := color.NRGBA{R: 30, G: 30, B: 30, A: 100}
+	paint.FillShape(gtx.Ops, borderColor, clip.Stroke{
+		Path:  containerRR.Path(gtx.Ops),
+		Width: float32(gtx.Dp(0.5)),
 	}.Op())
 
 	off.Pop()
 
+	_ = dims
 	return layout.Dimensions{Size: image.Pt(w, h)}, result
 }

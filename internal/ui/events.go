@@ -1,9 +1,14 @@
 package ui
 
 import (
+	"bytes"
+	"io"
+
+	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"yutug.lol/spark/internal/config"
 	"yutug.lol/spark/internal/terminal"
@@ -22,7 +27,12 @@ func buildFilters(tag *struct{}, bm *config.BindingManager) []event.Filter {
 			Kinds:   pointer.Scroll,
 			ScrollY: pointer.ScrollRange{Min: -1000000, Max: 1000000},
 		},
+		pointer.Filter{
+			Target:  tag,
+			Kinds:   pointer.Press | pointer.Release | pointer.Move | pointer.Drag,
+		},
 		key.FocusFilter{Target: tag},
+		transfer.TargetFilter{Target: tag, Type: "text/plain"},
 		key.Filter{Focus: tag, Name: "", Optional: ctrl | shift | alt},
 		key.Filter{Focus: tag, Name: key.NameReturn},
 		key.Filter{Focus: tag, Name: key.NameEnter},
@@ -106,24 +116,77 @@ func (win *Window) handleEvents(gtx layout.Context) {
 
 		case pointer.Event:
 			if e.Kind == pointer.Scroll {
-				if e.Scroll.Y > 0 {
-					active.term.Scroll(-3)
-				} else if e.Scroll.Y < 0 {
-					active.term.Scroll(3)
+				if e.Modifiers.Contain(key.ModCtrl) {
+					if e.Scroll.Y > 0 {
+						win.changeFontSize(-1)
+					} else if e.Scroll.Y < 0 {
+						win.changeFontSize(1)
+					}
+				} else if active.term.MouseTracking() > 0 {
+					btn := 4
+					if e.Scroll.Y > 0 {
+						btn = 5
+					}
+					col := int(e.Position.X) / win.renderer.CellWidth
+					row := int(e.Position.Y) / win.renderer.CellHeight
+					active.term.HandleMouse(btn, col, row, true, false, false)
+				} else {
+					if e.Scroll.Y > 0 {
+						active.term.Scroll(-3)
+					} else if e.Scroll.Y < 0 {
+						active.term.Scroll(3)
+					}
+				}
+			} else if e.Kind == pointer.Press || e.Kind == pointer.Release || e.Kind == pointer.Move || e.Kind == pointer.Drag {
+				active.MouseX = int(e.Position.X)
+				if active.term.MouseTracking() > 0 {
+					col := int(e.Position.X) / win.renderer.CellWidth
+					row := int(e.Position.Y) / win.renderer.CellHeight
+					btn := 0
+					if e.Buttons&pointer.ButtonPrimary != 0 {
+						btn = 1
+					} else if e.Buttons&pointer.ButtonSecondary != 0 {
+						btn = 3
+					} else if e.Buttons&pointer.ButtonTertiary != 0 {
+						btn = 2
+					}
+					press := e.Kind == pointer.Press
+					release := e.Kind == pointer.Release
+					motion := e.Kind == pointer.Move || e.Kind == pointer.Drag
+					active.term.HandleMouse(btn, col, row, press, release, motion)
+				} else {
+					col := int(e.Position.X) / win.renderer.CellWidth
+					row := int(e.Position.Y) / win.renderer.CellHeight
+
+					snap := active.term.Snapshot()
+					absRow := row - snap.ScrollOffset
+
+					switch e.Kind {
+					case pointer.Press:
+						if e.Buttons&pointer.ButtonPrimary != 0 {
+							active.term.SelectionStart(absRow, col)
+							win.w.Invalidate()
+						}
+					case pointer.Drag:
+						active.term.SelectionUpdate(absRow, col)
+						win.w.Invalidate()
+					case pointer.Release:
+						active.term.SelectionEnd()
+					}
 				}
 			}
 
 		case key.FocusEvent:
 			win.focused = e.Focus
+			active.term.HandleFocus(e.Focus)
 
 		case key.Event:
 			if e.State != key.Press {
 				continue
 			}
 
-			// ── Check binding manager first ───────────────────────────────
 			if action := win.bindings.Resolve(e); action != config.ActionNone {
-				win.handleAction(action)
+				win.handleAction(gtx, action)
 				continue
 			}
 
@@ -131,7 +194,6 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				continue
 			}
 
-			// ── Forward everything else to the PTY ────────────────────────
 			b := terminal.KeyToBytes(e, active.term.AppCursorKeys())
 			if len(b) > 0 {
 				active.term.Scroll(-999999)
@@ -142,17 +204,39 @@ func (win *Window) handleEvents(gtx layout.Context) {
 			if win.searchActive {
 				continue
 			}
-			// Space is already handled via key.NameSpace in KeyToBytes.
 			if active.pty != nil && e.Text != " " {
 				active.term.Scroll(-999999)
-				active.pty.Write([]byte(e.Text)) //nolint:errcheck
+				if active.term.BracketedPaste() && len(e.Text) > 1 {
+					active.pty.Write([]byte("\x1b[200~")) //nolint:errcheck
+					active.pty.Write([]byte(e.Text)) //nolint:errcheck
+					active.pty.Write([]byte("\x1b[201~")) //nolint:errcheck
+				} else {
+					active.pty.Write([]byte(e.Text)) //nolint:errcheck
+				}
+			}
+
+		case transfer.DataEvent:
+			if active.pty != nil {
+				rc := e.Open()
+				data, err := io.ReadAll(rc)
+				rc.Close() //nolint:errcheck
+				if err == nil && len(data) > 0 {
+					active.term.Scroll(-999999)
+					if active.term.BracketedPaste() {
+						active.pty.Write([]byte("\x1b[200~")) //nolint:errcheck
+						active.pty.Write(data) //nolint:errcheck
+						active.pty.Write([]byte("\x1b[201~")) //nolint:errcheck
+					} else {
+						active.pty.Write(data) //nolint:errcheck
+					}
+				}
 			}
 		}
 	}
 }
 
 // handleAction executes a resolved Action against the current window state.
-func (win *Window) handleAction(action config.Action) {
+func (win *Window) handleAction(gtx layout.Context, action config.Action) {
 	switch action {
 	case config.ActionNewTab:
 		win.newTab() //nolint:errcheck
@@ -202,5 +286,20 @@ func (win *Window) handleAction(action config.Action) {
 	case config.ActionFind:
 		win.searchActive = true
 		win.w.Invalidate()
+
+	case config.ActionCopyText:
+		if active := win.active(); active != nil {
+			text := active.term.SelectedText()
+			if text != "" {
+				gtx.Execute(clipboard.WriteCmd{
+					Type: "text/plain",
+					Data: io.NopCloser(bytes.NewReader([]byte(text))),
+				})
+				win.ShowToast("Copied to clipboard")
+			}
+		}
+
+	case config.ActionPaste:
+		gtx.Execute(clipboard.ReadCmd{Tag: &win.inputTag})
 	}
 }

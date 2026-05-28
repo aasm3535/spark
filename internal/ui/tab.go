@@ -18,6 +18,12 @@ type Tab struct {
 
 	// TabState holds the clickable widgets used by TabBar.
 	State components.TabState
+
+	// SbWidth tracks the animating width of the vertical scrollbar.
+	SbWidth float32
+
+	// MouseX tracks the current mouse X position for proximity detection.
+	MouseX int
 }
 
 // newTab spawns a new PTY + terminal and appends it to the window.
@@ -27,6 +33,11 @@ func (win *Window) newTab() error {
 		return err
 	}
 	term := terminal.New(terminal.DefaultCols, terminal.DefaultRows, win.w)
+
+	// Wire PTY writer so terminal can send responses back
+	term.SetPTYWriter(func(b []byte) {
+		p.Write(b) //nolint:errcheck
+	})
 
 	tab := &Tab{
 		term: term,

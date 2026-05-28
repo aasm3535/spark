@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/color"
 
-	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -49,6 +48,7 @@ func (tb *TabBar) Layout(
 	gtx layout.Context,
 	th *material.Theme,
 	activeIdx int,
+	titles []string,
 ) (layout.Dimensions, TabBarResult) {
 	if len(tb.Tabs) <= 1 {
 		return layout.Dimensions{}, TabBarResult{}
@@ -81,7 +81,11 @@ func (tb *TabBar) Layout(
 			m := op.Record(gtx.Ops)
 			dims := tab.BtnClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
-				return layoutTabItem(gtx, th, tab, i, isActive)
+				title := fmt.Sprintf("Tab %d", i+1)
+				if i < len(titles) && titles[i] != "" {
+					title = titles[i]
+				}
+				return layoutTabItem(gtx, th, tab, title, isActive)
 			})
 			call := m.Stop()
 
@@ -110,28 +114,28 @@ func (tb *TabBar) Layout(
 
 // ─── Tab item ─────────────────────────────────────────────────────────────────
 
-// layoutTabItem draws the label (centred) and close button (right-pinned).
+// layoutTabItem рисует название вкладки и кнопку закрытия
 func layoutTabItem(
 	gtx layout.Context,
 	th *material.Theme,
 	tab *TabState,
-	idx int,
+	title string,
 	isActive bool,
 ) layout.Dimensions {
-	// closeW mirrors the close button so the label is truly centred.
+	// closeW компенсирует ширину кнопки закрытия для центрирования
 	closeW := gtx.Dp(unit.Dp(4 + 4 + 16 + 6))
 
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		// Left spacer = close button width.
+		// Левый отступ для баланса
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(closeW, 0)}
 		}),
 
-		// Centred label.
+		// Отцентрированный текст
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					lbl := material.Label(th, unit.Sp(12), fmt.Sprintf("Tab %d", idx+1))
+					lbl := material.Label(th, unit.Sp(12), title)
 					lbl.Font = font.Font{
 						Typeface: "Segoe UI, sans-serif",
 						Weight:   font.Normal,
@@ -147,7 +151,7 @@ func layoutTabItem(
 			})
 		}),
 
-		// Close button.
+		// Кнопка закрытия
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutCloseButton(gtx, tab, isActive)
 		}),
@@ -162,8 +166,6 @@ func layoutCloseButton(gtx layout.Context, tab *TabState, isActive bool) layout.
 		return tab.BtnClose.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				size := gtx.Dp(unit.Dp(16))
-				drawSize := float32(gtx.Dp(unit.Dp(8)))
-				padding := (float32(size) - drawSize) / 2
 				gtx.Constraints = layout.Exact(image.Pt(size, size))
 
 				// Circular hover highlight.
@@ -181,16 +183,8 @@ func layoutCloseButton(gtx layout.Context, tab *TabState, isActive bool) layout.
 						col = ColorText
 					}
 
-					var p clip.Path
-					p.Begin(gtx.Ops)
-					p.MoveTo(f32.Pt(padding, padding))
-					p.LineTo(f32.Pt(padding+drawSize, padding+drawSize))
-					p.MoveTo(f32.Pt(padding+drawSize, padding))
-					p.LineTo(f32.Pt(padding, padding+drawSize))
-
-					paint.FillShape(gtx.Ops, col,
-						clip.Stroke{Path: p.End(), Width: float32(gtx.Dp(unit.Dp(1)))}.Op(),
-					)
+					scale := gtx.Dp(1)
+					drawSharpCross(gtx.Ops, size/2, size/2, 4*scale, scale, col)
 				}
 
 				return layout.Dimensions{Size: image.Pt(size, size)}
@@ -198,3 +192,5 @@ func layoutCloseButton(gtx layout.Context, tab *TabState, isActive bool) layout.
 		})
 	})
 }
+
+

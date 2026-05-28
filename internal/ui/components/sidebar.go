@@ -52,8 +52,8 @@ func (s *Sidebar) Layout(
 	width := gtx.Dp(unit.Dp(160)) // Ширина боковой панели
 	height := gtx.Constraints.Max.Y
 
-	// Фон сайдбара (темнее основного фона)
-	bgCol := blendColor(ColorTitleBar, -2)
+	// Фон сайдбара (совпадает с тайтлбаром)
+	bgCol := ColorTitleBar
 	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 
 	// Правая граница сайдбара
@@ -162,7 +162,7 @@ func (s *Sidebar) layoutTabItem(
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				// РЕГУЛИРОВКА ВЕРТИКАЛЬНОГО СМЕЩЕНИЯ ТЕКСТА
 				// Изменяйте это значение (например: -2, 0, 2), чтобы сдвинуть текст по Y
-				visualTuningY := unit.Dp(0)
+				visualTuningY := unit.Dp(8)
 
 				return layout.Inset{Top: visualTuningY}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,

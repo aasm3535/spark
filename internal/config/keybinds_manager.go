@@ -8,21 +8,21 @@ type Action int
 const (
 	ActionNone Action = iota
 
-	// Tab management
 	ActionNewTab
 	ActionCloseTab
 	ActionNextTab
 	ActionPrevTab
 
-	// Scrollback
 	ActionScrollUp
 	ActionScrollDown
 	ActionScrollPageUp
 	ActionScrollPageDown
 
-	// General
 	ActionCommandPalette
 	ActionFind
+
+	ActionCopyText
+	ActionPaste
 )
 
 // String returns a human-readable name for the action.
@@ -48,6 +48,10 @@ func (a Action) String() string {
 		return "command_palette"
 	case ActionFind:
 		return "find"
+	case ActionCopyText:
+		return "copy_text"
+	case ActionPaste:
+		return "paste"
 	default:
 		return "none"
 	}
@@ -83,6 +87,8 @@ func NewBindingManager(cfg *Config) *BindingManager {
 		{kb.ScrollPageDown, ActionScrollPageDown},
 		{kb.CommandPalette, ActionCommandPalette},
 		{kb.Find, ActionFind},
+		{kb.CopyText, ActionCopyText},
+		{kb.Paste, ActionPaste},
 	}
 
 	bm := &BindingManager{}

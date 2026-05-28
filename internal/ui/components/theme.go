@@ -16,18 +16,18 @@ import (
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
 var (
-	ColorBg        = color.NRGBA{R: 32, G: 32, B: 32, A: 255}
-	ColorTitleBar  = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
-	ColorTitleText = color.NRGBA{R: 170, G: 170, B: 170, A: 255}
-	ColorText      = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
-	ColorCursor    = color.NRGBA{R: 200, G: 200, B: 200, A: 220}
+	ColorBg        = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+	ColorTitleBar  = color.NRGBA{R: 10, G: 10, B: 10, A: 255}
+	ColorTitleText = color.NRGBA{R: 161, G: 161, B: 161, A: 255}
+	ColorText      = color.NRGBA{R: 237, G: 237, B: 237, A: 255}
+	ColorCursor    = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 
-	ColorBtnHoverClose   = color.NRGBA{R: 196, G: 43, B: 28, A: 255}
-	ColorBtnHoverNeutral = color.NRGBA{R: 255, G: 255, B: 255, A: 25}
+	ColorBtnHoverClose   = color.NRGBA{R: 225, G: 29, B: 72, A: 255}
+	ColorBtnHoverNeutral = color.NRGBA{R: 255, G: 255, B: 255, A: 15}
 
-	ColorTabActiveBg   = color.NRGBA{R: 32, G: 32, B: 32, A: 255}
-	ColorTabInactiveBg = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
-	ColorTabHoverBg    = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
+	ColorTabActiveBg   = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+	ColorTabInactiveBg = color.NRGBA{R: 10, G: 10, B: 10, A: 255}
+	ColorTabHoverBg    = color.NRGBA{R: 26, G: 26, B: 26, A: 255}
 )
 
 // blendColor lightens (amount > 0) or darkens (amount < 0) a colour.
@@ -109,29 +109,35 @@ func applyThemeColors(cfg *config.Config) {
 
 // ─── Font descriptors ─────────────────────────────────────────────────────────
 
-const MonoFaceList = "Iosevka Fixed, Go Mono, monospace"
+const MonoFaceList = "Geist Mono"
 
-type iosevkaFile struct {
+type fontFile struct {
 	data   []byte
 	weight font.Weight
 	style  font.Style
 }
 
-var iosevkaFiles = []iosevkaFile{
-	{assets.IosevkaLight, font.Light, font.Regular},
-	{assets.IosevkaMedium, font.Medium, font.Regular},
-	{assets.IosevkaThin, font.Thin, font.Regular},
+var geistMonoFiles = []fontFile{
+	{assets.GeistMonoLight, font.Light, font.Regular},
+	{assets.GeistMonoRegular, font.Normal, font.Regular},
+	{assets.GeistMonoMedium, font.Medium, font.Regular},
+	{assets.GeistMonoBold, font.Bold, font.Regular},
 }
 
 // ─── Theme constructor ────────────────────────────────────────────────────────
 
-// NewTheme builds a material.Theme with the Iosevka Fixed font and applies
+// NewTheme builds a material.Theme with the Geist Mono font and applies
 // colours from cfg.
 func NewTheme(cfg *config.Config) *material.Theme {
 	applyThemeColors(cfg)
 
-	collection := loadIosevka()
+	collection := loadGeistMono()
 	collection = append(collection, gofont.Collection()...)
+	if cfg != nil {
+		collection = append(collection, loadSystemFonts(cfg.FontFamily)...)
+	} else {
+		collection = append(collection, loadSystemFonts("")...)
+	}
 
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(collection))
@@ -153,23 +159,21 @@ func NewTheme(cfg *config.Config) *material.Theme {
 	return th
 }
 
-func loadIosevka() []font.FontFace {
+func loadGeistMono() []font.FontFace {
 	var faces []font.FontFace
-	for _, f := range iosevkaFiles {
-		parsed, err := opentype.ParseCollection(f.data)
+	for _, f := range geistMonoFiles {
+		parsed, err := opentype.Parse(f.data)
 		if err != nil {
 			continue
 		}
-		for _, face := range parsed {
-			faces = append(faces, font.FontFace{
-				Font: font.Font{
-					Typeface: "Iosevka Fixed",
-					Weight:   f.weight,
-					Style:    f.style,
-				},
-				Face: face.Face,
-			})
-		}
+		faces = append(faces, font.FontFace{
+			Font: font.Font{
+				Typeface: "Geist Mono",
+				Weight:   f.weight,
+				Style:    f.style,
+			},
+			Face: parsed,
+		})
 	}
 	return faces
 }

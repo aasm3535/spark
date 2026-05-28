@@ -217,9 +217,10 @@ they want to override.
 
 ```json
 {
-  "font_family": "Iosevka Fixed, Go Mono, monospace",
+  "font_family": "Geist Mono",
   "font_size": 14,
   "theme": "default",
+  "padding": 5,
 
   "custom_theme": {
     "bg":               "#121218",

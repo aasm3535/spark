@@ -39,17 +39,16 @@ type ThemeColors struct {
 type Keybinds struct {
 	CommandPalette string `json:"command_palette"`
 	Find           string `json:"find"`
-	// Tab management
-	NewTab   string `json:"new_tab"`
-	CloseTab string `json:"close_tab"`
-	NextTab  string `json:"next_tab"`
-	PrevTab  string `json:"prev_tab"`
-
-	// Scrollback
+	NewTab         string `json:"new_tab"`
+	CloseTab       string `json:"close_tab"`
+	NextTab        string `json:"next_tab"`
+	PrevTab        string `json:"prev_tab"`
 	ScrollUp       string `json:"scroll_up"`
 	ScrollDown     string `json:"scroll_down"`
 	ScrollPageUp   string `json:"scroll_page_up"`
 	ScrollPageDown string `json:"scroll_page_down"`
+	CopyText       string `json:"copy_text"`
+	Paste          string `json:"paste"`
 }
 
 // DefaultKeybinds returns the built-in key bindings.
@@ -65,6 +64,8 @@ func DefaultKeybinds() Keybinds {
 		ScrollDown:     "Shift+DownArrow",
 		ScrollPageUp:   "Shift+PageUp",
 		ScrollPageDown: "Shift+PageDown",
+		CopyText:       "Ctrl+Shift+C",
+		Paste:          "Ctrl+Shift+V",
 	}
 }
 
@@ -101,6 +102,12 @@ func (d Keybinds) Merge(o Keybinds) Keybinds {
 	if o.ScrollPageDown != "" {
 		d.ScrollPageDown = o.ScrollPageDown
 	}
+	if o.CopyText != "" {
+		d.CopyText = o.CopyText
+	}
+	if o.Paste != "" {
+		d.Paste = o.Paste
+	}
 	return d
 }
 
@@ -111,6 +118,7 @@ type Config struct {
 	FontFamily  string       `json:"font_family"`
 	FontSize    int          `json:"font_size"`
 	Theme       string       `json:"theme"`
+	Padding     int          `json:"padding"`
 	CustomTheme *ThemeColors `json:"custom_theme,omitempty"`
 	Keybinds    Keybinds     `json:"keybinds"`
 }
@@ -118,9 +126,10 @@ type Config struct {
 // DefaultConfig returns the default terminal settings.
 func DefaultConfig() *Config {
 	return &Config{
-		FontFamily: "Iosevka Fixed, Go Mono, monospace",
+		FontFamily: "Geist Mono",
 		FontSize:   14,
 		Theme:      "default",
+		Padding:    5,
 		Keybinds:   DefaultKeybinds(),
 	}
 }
@@ -163,6 +172,12 @@ func Load() (*Config, error) {
 	cfg := DefaultConfig()
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+
+	// Migrate old font family default
+	if cfg.FontFamily == "Iosevka Fixed, Go Mono, monospace" || cfg.FontFamily == "Geist Mono, Iosevka Fixed, Go Mono, monospace" {
+		cfg.FontFamily = "Geist Mono"
+		_ = Save(cfg)
 	}
 
 	return cfg, nil

@@ -8,7 +8,7 @@ A minimal terminal emulator for Windows and Linux, built with [Gio](https://giou
 - Unix PTY backend on Linux and WSL ($SHELL / bash)
 - ANSI / VT100 color and attribute support (16, 256, truecolor)
 - Custom borderless window with native-style controls
-- Embedded Iosevka Fixed font
+- Embedded Geist Mono font
 - Full keyboard support: Ctrl+A–Z, F1–F12, arrows, etc.
 - Multiple tabs (Ctrl+Shift+T / Ctrl+Shift+W)
 - Configurable keybinds and theme via `~/.spark/config.json`
@@ -40,7 +40,7 @@ change.
 
 ```json
 {
-  "font_family": "Iosevka Fixed, Go Mono, monospace",
+  "font_family": "Geist Mono",
   "font_size": 14,
   "theme": "default",
 
