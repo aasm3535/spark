@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 	"sync"
@@ -59,11 +60,36 @@ type Terminal struct {
 
 	showCursor bool
 	lineWrap   bool
+	originMode bool
+
+	// Mouse tracking
+	mouseTracking int
+	mouseSGR      bool
+
+	// Bracketed paste mode
+	bracketedPaste bool
+
+	// Focus events
+	focusEvents bool
+
+	// Text selection
+	selStart  SelPos
+	selEnd    SelPos
+	selecting bool
+
+	// PTY writer for sending responses
+	ptyWriter func([]byte)
 
 	inv Invalidator
+
+	// Заголовок окна (OSC 0/2)
+	title string
 }
 
-// New creates a Terminal with the given dimensions.
+type SelPos struct {
+	Row, Col int
+}
+
 func New(cols, rows int, inv Invalidator) *Terminal {
 	t := &Terminal{
 		cols:         cols,
@@ -78,6 +104,20 @@ func New(cols, rows int, inv Invalidator) *Terminal {
 	}
 	t.screen = t.makeScreen(cols, rows)
 	return t
+}
+
+// SetPTYWriter sets the callback for sending responses back to the PTY.
+func (t *Terminal) SetPTYWriter(w func([]byte)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.ptyWriter = w
+}
+
+// writeResponse sends a response string back to the PTY.
+func (t *Terminal) writeResponse(s string) {
+	if t.ptyWriter != nil {
+		t.ptyWriter([]byte(s))
+	}
 }
 
 // ─── Screen helpers ───────────────────────────────────────────────────────────
@@ -98,6 +138,25 @@ func (t *Terminal) makeLine(cols int) []Cell {
 	return line
 }
 
+func (t *Terminal) eraseCell() Cell {
+	return Cell{
+		Ch:   ' ',
+		Fg:   t.fgColor,
+		Bg:   t.bgColor,
+		Bold: t.bold,
+	}
+}
+
+func (t *Terminal) makeEraseLine(cols int) []Cell {
+	line := make([]Cell, cols)
+	cell := t.eraseCell()
+	for i := range line {
+		line[i] = cell
+	}
+	return line
+}
+
+
 // ─── Snapshot (for renderer) ──────────────────────────────────────────────────
 
 // SearchHighlight defines a region in the terminal to highlight.
@@ -112,7 +171,10 @@ type Snapshot struct {
 	Screen        [][]Cell
 	ScrollOffset  int
 	ScrollTotal   int
-	SearchMatches map[int][]SearchHighlight // row index -> highlights
+	SearchMatches map[int][]SearchHighlight
+	SelStart      SelPos
+	SelEnd        SelPos
+	HasSelection  bool
 }
 
 // Snapshot returns a deep copy of the current screen state, safe to read
@@ -130,10 +192,16 @@ func (t *Terminal) Snapshot() Snapshot {
 		ScrollOffset:  t.scrollOffset,
 		ScrollTotal:   len(t.scrollback),
 		SearchMatches: make(map[int][]SearchHighlight),
+		SelStart:      t.selStart,
+		SelEnd:        t.selEnd,
+		HasSelection:  t.selStart != t.selEnd,
 	}
 
 	if t.scrollOffset > 0 {
 		snap.CurY += t.scrollOffset
+		if snap.CurY >= t.rows {
+			snap.CurY = t.rows - 1
+		}
 	}
 
 	snap.Screen = make([][]Cell, t.rows)
@@ -287,7 +355,7 @@ func (t *Terminal) newline() {
 			}
 		}
 		t.screen = append(t.screen[:t.marginTop], t.screen[t.marginTop+1:]...)
-		blank := t.makeLine(t.cols)
+		blank := t.makeEraseLine(t.cols)
 		if t.marginBottom == t.rows-1 {
 			t.screen = append(t.screen, blank)
 		} else {
@@ -311,6 +379,201 @@ func (t *Terminal) AppCursorKeys() bool {
 	return t.appCursorKeys
 }
 
+// MouseTracking returns the current mouse tracking mode (0=off, 1000/1002/1003).
+func (t *Terminal) MouseTracking() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.mouseTracking
+}
+
+// MouseSGR returns true if SGR extended mouse mode is active.
+func (t *Terminal) MouseSGR() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.mouseSGR
+}
+
+// BracketedPaste returns true if bracketed paste mode is active.
+func (t *Terminal) BracketedPaste() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.bracketedPaste
+}
+
+// FocusEvents returns true if focus event reporting is enabled.
+func (t *Terminal) FocusEvents() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.focusEvents
+}
+
+// HandleMouse processes a mouse event and sends it to the PTY if tracking is enabled.
+func (t *Terminal) HandleMouse(button int, x, y int, press bool, release bool, motion bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.mouseTracking == 0 {
+		return
+	}
+
+	// Only send motion events if tracking mode supports it
+	if motion && t.mouseTracking != 1003 && t.mouseTracking != 1002 {
+		return
+	}
+
+	// Button encoding
+	btn := 0
+	switch button {
+	case 1:
+		btn = 0
+	case 2:
+		btn = 1
+	case 3:
+		btn = 2
+	case 4:
+		btn = 64 // scroll up
+	case 5:
+		btn = 65 // scroll down
+	}
+
+	if motion {
+		btn |= 32
+	}
+
+	if t.mouseSGR {
+		// SGR extended mode: CSI < Pb ; Px ; Py M/m
+		final := 'M'
+		if release {
+			final = 'm'
+		}
+		t.writeResponse(fmt.Sprintf("\x1b[<%d;%d;%d%c", btn, x+1, y+1, final))
+	} else {
+		// Normal mode: CSI M Cb Cx Cy
+		if !release {
+			t.writeResponse(fmt.Sprintf("\x1b[M%c%c%c", btn+32, x+33, y+33))
+		}
+	}
+}
+
+// HandleFocus sends a focus in/out event if focus reporting is enabled.
+func (t *Terminal) HandleFocus(focused bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !t.focusEvents {
+		return
+	}
+
+	if focused {
+		t.writeResponse("\x1b[I")
+	} else {
+		t.writeResponse("\x1b[O")
+	}
+}
+
+func (t *Terminal) SelectionStart(row, col int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.selStart = SelPos{Row: row, Col: col}
+	t.selEnd = t.selStart
+	t.selecting = true
+}
+
+func (t *Terminal) SelectionUpdate(row, col int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.selecting {
+		return
+	}
+	t.selEnd = SelPos{Row: row, Col: col}
+}
+
+func (t *Terminal) SelectionEnd() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.selecting = false
+}
+
+func (t *Terminal) ClearSelection() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.selStart = SelPos{}
+	t.selEnd = SelPos{}
+	t.selecting = false
+}
+
+func (t *Terminal) HasSelection() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.selStart != t.selEnd
+}
+
+func (t *Terminal) SelectedText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.selStart == t.selEnd {
+		return ""
+	}
+
+	start, end := t.selStart, t.selEnd
+	if start.Row > end.Row || (start.Row == end.Row && start.Col > end.Col) {
+		start, end = end, start
+	}
+
+	var sb strings.Builder
+	sbLen := len(t.scrollback)
+
+	for row := start.Row; row <= end.Row; row++ {
+		var line []Cell
+		vIdx := row
+		if vIdx < sbLen {
+			line = t.scrollback[vIdx]
+		} else {
+			screenIdx := vIdx - sbLen
+			if screenIdx < len(t.screen) {
+				line = t.screen[screenIdx]
+			}
+		}
+
+		startCol := 0
+		if row == start.Row {
+			startCol = start.Col
+		}
+		endCol := len(line)
+		if row == end.Row {
+			endCol = end.Col
+		}
+
+		if startCol > len(line) {
+			startCol = len(line)
+		}
+		if endCol > len(line) {
+			endCol = len(line)
+		}
+
+		for col := startCol; col < endCol; col++ {
+			ch := line[col].Ch
+			if ch == 0 {
+				ch = ' '
+			}
+			sb.WriteRune(ch)
+		}
+
+		if row < end.Row {
+			sb.WriteRune('\n')
+		}
+	}
+
+	return strings.TrimRight(sb.String(), " \t\n")
+}
+
+func (t *Terminal) Selection() (SelPos, SelPos, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.selStart, t.selEnd, t.selecting
+}
+
 func (t *Terminal) Resize(cols, rows int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -318,12 +581,23 @@ func (t *Terminal) Resize(cols, rows int) {
 		return
 	}
 	newScreen := t.makeScreen(cols, rows)
-	for y := 0; y < rows && y < t.rows; y++ {
-		for x := 0; x < cols && x < t.cols; x++ {
+	for y := 0; y < rows && y < len(t.screen); y++ {
+		for x := 0; x < cols && x < len(t.screen[y]); x++ {
 			newScreen[y][x] = t.screen[y][x]
 		}
 	}
 	t.screen = newScreen
+
+	if t.altScreen != nil {
+		newAltScreen := t.makeScreen(cols, rows)
+		for y := 0; y < rows && y < len(t.altScreen); y++ {
+			for x := 0; x < cols && x < len(t.altScreen[y]); x++ {
+				newAltScreen[y][x] = t.altScreen[y][x]
+			}
+		}
+		t.altScreen = newAltScreen
+	}
+
 	t.cols = cols
 	t.rows = rows
 	t.marginTop = 0
@@ -333,6 +607,18 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 	if t.curY >= rows {
 		t.curY = rows - 1
+	}
+	if t.savedX >= cols {
+		t.savedX = cols - 1
+	}
+	if t.savedY >= rows {
+		t.savedY = rows - 1
+	}
+	if t.altCurX >= cols {
+		t.altCurX = cols - 1
+	}
+	if t.altCurY >= rows {
+		t.altCurY = rows - 1
 	}
 }
 
@@ -344,6 +630,7 @@ func (t *Terminal) tryFinishEscape() {
 	// OSC: ESC ] … BEL  or  ESC ] … ESC \
 	if len(s) > 1 && s[1] == ']' {
 		if strings.HasSuffix(s, "\x07") || strings.HasSuffix(s, "\x1b\\") {
+			t.parseOSC(s)
 			t.inEscape = false
 			t.escBuf.Reset()
 		}
@@ -354,7 +641,7 @@ func (t *Terminal) tryFinishEscape() {
 		return
 	}
 
-	// CSI: ESC [ <params> <final>
+	// CSI: ESC [ <params> <intermediate> <final>
 	if len(s) > 1 && s[1] == '[' {
 		body := s[2:]
 		if len(body) == 0 {
@@ -362,7 +649,19 @@ func (t *Terminal) tryFinishEscape() {
 		}
 		last := body[len(body)-1]
 		if last >= 0x40 && last <= 0x7e {
-			t.handleCSI(body[:len(body)-1], last)
+			params := body[:len(body)-1]
+			intermediate := ""
+			for i := len(params) - 1; i >= 0; i-- {
+				if params[i] >= 0x20 && params[i] <= 0x2F {
+					intermediate = params[i:]
+					params = params[:i]
+					break
+				}
+				if params[i] < 0x30 || params[i] > 0x3F {
+					break
+				}
+			}
+			t.handleCSI(params, intermediate, last)
 			t.inEscape = false
 			t.escBuf.Reset()
 		}
@@ -381,7 +680,8 @@ func (t *Terminal) tryFinishEscape() {
 		case '7':
 			t.savedX, t.savedY = t.curX, t.curY
 		case '8':
-			t.curX, t.curY = t.savedX, t.savedY
+			t.curX = clamp(t.savedX, 0, t.cols-1)
+			t.curY = clamp(t.savedY, 0, t.rows-1)
 		case 'D':
 			t.newline()
 		case 'E':
@@ -389,7 +689,7 @@ func (t *Terminal) tryFinishEscape() {
 			t.curX = 0
 		case 'M':
 			if t.curY == t.marginTop {
-				blank := t.makeLine(t.cols)
+				blank := t.makeEraseLine(t.cols)
 				t.screen = append(t.screen[:t.marginBottom], t.screen[t.marginBottom+1:]...)
 				newScreen := make([][]Cell, 0, t.rows)
 				newScreen = append(newScreen, t.screen[:t.marginTop]...)
@@ -421,17 +721,43 @@ func (t *Terminal) tryFinishEscape() {
 
 // ─── CSI dispatch ─────────────────────────────────────────────────────────────
 
-func (t *Terminal) handleCSI(params string, final byte) {
+func (t *Terminal) handleCSI(params string, intermediate string, final byte) {
+	params = strings.ReplaceAll(params, "::", ":")
+	params = strings.ReplaceAll(params, ":", ";")
 	parts := strings.Split(params, ";")
 
-	clamp := func(v, lo, hi int) int {
-		if v < lo {
-			return lo
+	t.curX = clamp(t.curX, 0, t.cols-1)
+	t.curY = clamp(t.curY, 0, t.rows-1)
+
+	// DA2: CSI > Ps c — Secondary Device Attributes
+	if strings.HasPrefix(params, ">") || (len(parts) > 0 && parts[0] == ">") {
+		if final == 'c' {
+			t.writeResponse("\x1b[>0;0;0c")
+			return
 		}
-		if v > hi {
-			return hi
+	}
+
+	// DA1: CSI c or CSI 0 c — Device Attributes
+	if final == 'c' && (params == "" || params == "0") {
+		t.writeResponse("\x1b[?62;22c")
+		return
+	}
+
+	// Device Status Report: CSI 6 n
+	if final == 'n' && len(parts) > 0 && parts[0] == "6" {
+		t.writeResponse(fmt.Sprintf("\x1b[%d;%dR", t.curY+1, t.curX+1))
+		return
+	}
+
+	// Window operations: CSI Ps ; Ps ; Ps t
+	if final == 't' {
+		if len(parts) > 0 {
+			switch parts[0] {
+			case "18":
+				t.writeResponse(fmt.Sprintf("\x1b[8;%d;%dt", t.rows, t.cols))
+			}
 		}
-		return v
+		return
 	}
 
 	switch final {
@@ -445,7 +771,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 			copy(line[t.curX+n:], line[t.curX:])
 		}
 		for x := t.curX; x < t.curX+n && x < t.cols; x++ {
-			line[x] = DefaultCell()
+			line[x] = t.eraseCell()
 		}
 	case 'A':
 		n := atoi(parts[0], 1)
@@ -471,41 +797,45 @@ func (t *Terminal) handleCSI(params string, final byte) {
 		if len(parts) >= 2 {
 			col = atoi(parts[1], 1)
 		}
-		t.curY = clamp(row-1, 0, t.rows-1)
+		if t.originMode {
+			t.curY = clamp(row-1+t.marginTop, t.marginTop, t.marginBottom)
+		} else {
+			t.curY = clamp(row-1, 0, t.rows-1)
+		}
 		t.curX = clamp(col-1, 0, t.cols-1)
 	case 'J':
 		switch atoi(parts[0], 0) {
 		case 0:
 			for x := t.curX; x < t.cols; x++ {
-				t.screen[t.curY][x] = DefaultCell()
+				t.screen[t.curY][x] = t.eraseCell()
 			}
 			for y := t.curY + 1; y < t.rows; y++ {
-				t.screen[y] = t.makeLine(t.cols)
+				t.screen[y] = t.makeEraseLine(t.cols)
 			}
 		case 1:
 			for y := 0; y < t.curY; y++ {
-				t.screen[y] = t.makeLine(t.cols)
+				t.screen[y] = t.makeEraseLine(t.cols)
 			}
 			for x := 0; x <= t.curX; x++ {
-				t.screen[t.curY][x] = DefaultCell()
+				t.screen[t.curY][x] = t.eraseCell()
 			}
 		case 2, 3:
 			for y := range t.screen {
-				t.screen[y] = t.makeLine(t.cols)
+				t.screen[y] = t.makeEraseLine(t.cols)
 			}
 		}
 	case 'K':
 		switch atoi(parts[0], 0) {
 		case 0:
 			for x := t.curX; x < t.cols; x++ {
-				t.screen[t.curY][x] = DefaultCell()
+				t.screen[t.curY][x] = t.eraseCell()
 			}
 		case 1:
 			for x := 0; x <= t.curX; x++ {
-				t.screen[t.curY][x] = DefaultCell()
+				t.screen[t.curY][x] = t.eraseCell()
 			}
 		case 2:
-			t.screen[t.curY] = t.makeLine(t.cols)
+			t.screen[t.curY] = t.makeEraseLine(t.cols)
 		}
 	case 'L':
 		n := atoi(parts[0], 1)
@@ -514,7 +844,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 				t.screen = append(t.screen[:t.marginBottom], t.screen[t.marginBottom+1:]...)
 				newScreen := make([][]Cell, 0, t.rows)
 				newScreen = append(newScreen, t.screen[:t.curY]...)
-				newScreen = append(newScreen, t.makeLine(t.cols))
+				newScreen = append(newScreen, t.makeEraseLine(t.cols))
 				newScreen = append(newScreen, t.screen[t.curY:]...)
 				t.screen = newScreen
 			}
@@ -526,7 +856,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 				t.screen = append(t.screen[:t.curY], t.screen[t.curY+1:]...)
 				newScreen := make([][]Cell, 0, t.rows)
 				newScreen = append(newScreen, t.screen[:t.marginBottom]...)
-				newScreen = append(newScreen, t.makeLine(t.cols))
+				newScreen = append(newScreen, t.makeEraseLine(t.cols))
 				newScreen = append(newScreen, t.screen[t.marginBottom:]...)
 				t.screen = newScreen
 			}
@@ -538,7 +868,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 		}
 		line := t.screen[t.curY]
 		for x := t.curX; x < t.curX+n && x < t.cols; x++ {
-			line[x] = DefaultCell()
+			line[x] = t.eraseCell()
 		}
 	case 'P':
 		n := atoi(parts[0], 1)
@@ -551,7 +881,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 		}
 		for x := t.cols - n; x < t.cols; x++ {
 			if x >= 0 {
-				line[x] = DefaultCell()
+				line[x] = t.eraseCell()
 			}
 		}
 	case 'S':
@@ -561,7 +891,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 				t.scrollback = append(t.scrollback, t.screen[0])
 			}
 			t.screen = append(t.screen[:t.marginTop], t.screen[t.marginTop+1:]...)
-			blank := t.makeLine(t.cols)
+			blank := t.makeEraseLine(t.cols)
 			if t.marginBottom == t.rows-1 {
 				t.screen = append(t.screen, blank)
 			} else {
@@ -576,7 +906,7 @@ func (t *Terminal) handleCSI(params string, final byte) {
 		n := atoi(parts[0], 1)
 		for i := 0; i < n; i++ {
 			t.screen = append(t.screen[:t.marginBottom], t.screen[t.marginBottom+1:]...)
-			blank := t.makeLine(t.cols)
+			blank := t.makeEraseLine(t.cols)
 			newScreen := make([][]Cell, 0, t.rows)
 			newScreen = append(newScreen, t.screen[:t.marginTop]...)
 			newScreen = append(newScreen, blank)
@@ -586,21 +916,55 @@ func (t *Terminal) handleCSI(params string, final byte) {
 	case 'm':
 		t.handleSGR(parts)
 	case 'h', 'l':
+		isDEC := strings.HasPrefix(params, "?")
 		for _, p := range parts {
 			p = strings.TrimPrefix(p, "?")
-			switch p {
-			case "1049", "47":
-				if final == 'h' {
-					t.enterAlt()
-				} else {
-					t.exitAlt()
+			if isDEC {
+				switch p {
+				case "1049", "47":
+					if final == 'h' {
+						t.enterAlt()
+					} else {
+						t.exitAlt()
+					}
+				case "1":
+					t.appCursorKeys = final == 'h'
+				case "6":
+					t.originMode = final == 'h'
+					if t.originMode {
+						t.curX, t.curY = 0, t.marginTop
+					} else {
+						t.curX, t.curY = 0, 0
+					}
+				case "7":
+					t.lineWrap = final == 'h'
+				case "25":
+					t.showCursor = final == 'h'
+				case "1000":
+					if final == 'h' {
+						t.mouseTracking = 1000
+					} else {
+						t.mouseTracking = 0
+					}
+				case "1002":
+					if final == 'h' {
+						t.mouseTracking = 1002
+					} else {
+						t.mouseTracking = 0
+					}
+				case "1003":
+					if final == 'h' {
+						t.mouseTracking = 1003
+					} else {
+						t.mouseTracking = 0
+					}
+				case "1004":
+					t.focusEvents = final == 'h'
+				case "1006":
+					t.mouseSGR = final == 'h'
+				case "2004":
+					t.bracketedPaste = final == 'h'
 				}
-			case "1":
-				t.appCursorKeys = final == 'h'
-			case "25":
-				t.showCursor = final == 'h'
-			case "7":
-				t.lineWrap = final == 'h'
 			}
 		}
 	case 'r':
@@ -621,7 +985,8 @@ func (t *Terminal) handleCSI(params string, final byte) {
 	case 's':
 		t.savedX, t.savedY = t.curX, t.curY
 	case 'u':
-		t.curX, t.curY = t.savedX, t.savedY
+		t.curX = clamp(t.savedX, 0, t.cols-1)
+		t.curY = clamp(t.savedY, 0, t.rows-1)
 	case 'n': // device status – ignore
 	}
 }
@@ -652,8 +1017,13 @@ func (t *Terminal) handleSGR(parts []string) {
 				t.fgColor = Ansi256(atoi(parts[i+2], 0))
 				i += 2
 			} else if i+4 < len(parts) && atoi(parts[i+1], -1) == 2 {
-				t.fgColor = rgb(parts[i+2], parts[i+3], parts[i+4])
-				i += 4
+				if i+5 < len(parts) {
+					t.fgColor = rgb(parts[i+3], parts[i+4], parts[i+5])
+					i += 5
+				} else {
+					t.fgColor = rgb(parts[i+2], parts[i+3], parts[i+4])
+					i += 4
+				}
 			}
 		case n == 39:
 			t.fgColor = ColorText
@@ -664,8 +1034,13 @@ func (t *Terminal) handleSGR(parts []string) {
 				t.bgColor = Ansi256(atoi(parts[i+2], 0))
 				i += 2
 			} else if i+4 < len(parts) && atoi(parts[i+1], -1) == 2 {
-				t.bgColor = rgb(parts[i+2], parts[i+3], parts[i+4])
-				i += 4
+				if i+5 < len(parts) {
+					t.bgColor = rgb(parts[i+3], parts[i+4], parts[i+5])
+					i += 5
+				} else {
+					t.bgColor = rgb(parts[i+2], parts[i+3], parts[i+4])
+					i += 4
+				}
 			}
 		case n == 49:
 			t.bgColor = ColorBg
@@ -696,7 +1071,8 @@ func (t *Terminal) exitAlt() {
 		return
 	}
 	t.screen = t.altScreen
-	t.curX, t.curY = t.altCurX, t.altCurY
+	t.curX = clamp(t.altCurX, 0, t.cols-1)
+	t.curY = clamp(t.altCurY, 0, t.rows-1)
 	t.altScreen = nil
 	t.inAlt = false
 }
@@ -711,6 +1087,15 @@ func (t *Terminal) fullReset() {
 	t.scrollback = nil
 	t.inAlt = false
 	t.altScreen = nil
+	t.originMode = false
+	t.mouseTracking = 0
+	t.mouseSGR = false
+	t.bracketedPaste = false
+	t.focusEvents = false
+	t.appCursorKeys = false
+	t.showCursor = true
+	t.lineWrap = true
+	t.title = ""
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
@@ -736,4 +1121,93 @@ func rgb(rs, gs, bs string) color.NRGBA {
 		B: uint8(atoi(bs, 0)),
 		A: 255,
 	}
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// Title возвращает текущий заголовок окна
+func (t *Terminal) Title() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.title
+}
+
+// parseOSC разбирает команды OSC (например, изменение заголовка)
+func (t *Terminal) parseOSC(s string) {
+	// Убираем ESC ] в начале
+	payload := s[2:]
+	
+	// Убираем маркер конца последовательности
+	if strings.HasSuffix(payload, "\x07") {
+		payload = payload[:len(payload)-1]
+	} else if strings.HasSuffix(payload, "\x1b\\") {
+		payload = payload[:len(payload)-2]
+	}
+
+	// Формат: [параметр];[значение]
+	parts := strings.SplitN(payload, ";", 2)
+	if len(parts) == 2 {
+		cmd := parts[0]
+		val := parts[1]
+		if cmd == "0" || cmd == "2" {
+			t.title = cleanTitle(val)
+		}
+	}
+}
+
+// cleanTitle очищает и форматирует имя процесса/заголовка
+func cleanTitle(title string) string {
+	// Убираем пути в Windows и Unix стиле
+	title = strings.ReplaceAll(title, "\\", "/")
+	if idx := strings.LastIndex(title, "/"); idx != -1 {
+		title = title[idx+1:]
+	}
+	// Убираем расширение .exe
+	if strings.HasSuffix(strings.ToLower(title), ".exe") {
+		title = title[:len(title)-4]
+	}
+	
+	// Красиво форматируем популярные оболочки
+	switch strings.ToLower(title) {
+	case "powershell":
+		return "PowerShell"
+	case "pwsh":
+		return "PowerShell"
+	case "cmd":
+		return "Command Prompt"
+	}
+	return title
+}
+
+// LastLine возвращает последнюю непустую строку для описания в табе
+func (t *Terminal) LastLine() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	
+	for r := len(t.screen) - 1; r >= 0; r-- {
+		var sb strings.Builder
+		for _, cell := range t.screen[r] {
+			if cell.Ch != 0 {
+				sb.WriteRune(cell.Ch)
+			}
+		}
+		trimmed := strings.TrimSpace(sb.String())
+		fields := strings.Fields(trimmed)
+		clean := strings.Join(fields, " ")
+		if clean != "" {
+			if len(clean) > 35 {
+				return clean[:32] + "..."
+			}
+			return clean
+		}
+	}
+	return ""
 }

@@ -86,7 +86,7 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 							title = tTitle
 						}
 					}
-					dims, res := win.titleBar.Layout(gtx, win.theme, w, title)
+					dims, res := win.titleBar.Layout(gtx, win.theme, w, title, win.sidebarActive)
 					if res.MenuClicked {
 						win.sidebarActive = !win.sidebarActive
 						win.w.Invalidate()
@@ -100,10 +100,12 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 								return layout.Dimensions{}
 							}
 
-							// Собираем заголовки вкладок
+							// Собираем заголовки и описания вкладок
 							titles := make([]string, len(win.tabs))
+							descriptions := make([]string, len(win.tabs))
 							for i, t := range win.tabs {
 								titles[i] = t.term.Title()
+								descriptions[i] = t.term.LastLine()
 							}
 
 							// Синхронизируем вкладки в боковой панели
@@ -115,7 +117,7 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 								win.sidebar.Tabs[i] = &tab.State
 							}
 
-							dims, res := win.sidebar.Layout(gtx, win.theme, win.activeTab, titles)
+							dims, res := win.sidebar.Layout(gtx, win.theme, win.activeTab, titles, descriptions)
 							if res.NewTabClicked {
 								win.newTab() //nolint:errcheck
 							}
