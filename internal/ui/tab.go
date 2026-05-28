@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"strings"
+	"time"
+
 	"gioui.org/io/system"
 	"gioui.org/widget"
 	sparkpty "yutug.lol/spark/internal/pty"
@@ -24,6 +27,10 @@ type Tab struct {
 
 	// MouseX tracks the current mouse X position for proximity detection.
 	MouseX int
+
+	// AI Agent detection state
+	activeAgent      string
+	lastProcessCheck time.Time
 }
 
 // newTab spawns a new PTY + terminal and appends it to the window.
@@ -98,4 +105,52 @@ func (win *Window) cleanup() {
 			t.pty.Close()
 		}
 	}
+}
+
+// CheckActiveAgent scans child processes of the shell to detect active AI agents.
+// It caches the result for 1.5 seconds to preserve performance.
+func (t *Tab) CheckActiveAgent() string {
+	if time.Since(t.lastProcessCheck) < 1500*time.Millisecond {
+		return t.activeAgent
+	}
+	t.lastProcessCheck = time.Now()
+
+	pid := t.pty.Pid()
+	if pid == 0 {
+		t.activeAgent = ""
+		return ""
+	}
+
+	children, err := sparkpty.GetChildProcesses(pid)
+	if err != nil {
+		t.activeAgent = ""
+		return ""
+	}
+
+	hasClaude := false
+	hasOpencode := false
+	hasPi := false
+
+	for _, child := range children {
+		name := strings.ToLower(child)
+		if strings.Contains(name, "claude") {
+			hasClaude = true
+		} else if strings.Contains(name, "opencode") {
+			hasOpencode = true
+		} else if strings.Contains(name, "pi") {
+			hasPi = true
+		}
+	}
+
+	if hasClaude {
+		t.activeAgent = "Claude Code"
+	} else if hasOpencode {
+		t.activeAgent = "Opencode"
+	} else if hasPi {
+		t.activeAgent = "Pi"
+	} else {
+		t.activeAgent = ""
+	}
+
+	return t.activeAgent
 }

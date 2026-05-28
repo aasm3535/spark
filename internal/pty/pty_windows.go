@@ -50,6 +50,10 @@ func (p *windowsPTY) Wait() error {
 	return err
 }
 
+func (p *windowsPTY) Pid() int {
+	return p.cpty.Pid()
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // DefaultShell returns the short shell name for display purposes.

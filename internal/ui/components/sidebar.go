@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"strings"
 
 	"gioui.org/font"
 	"gioui.org/io/event"
@@ -228,7 +229,12 @@ func (s *Sidebar) layoutTabItem(
 							}
 							lbl := material.Label(th, unit.Sp(9.5), desc)
 							lbl.Font.Typeface = "Segoe UI, sans-serif"
-							lbl.Color = blendColor(ColorTitleText, -30)
+							if strings.HasPrefix(desc, "🤖") {
+								lbl.Color = ColorText
+								lbl.Font.Weight = font.Medium
+							} else {
+								lbl.Color = blendColor(ColorTitleText, -30)
+							}
 							lbl.MaxLines = 1
 							return lbl.Layout(gtx)
 						}),
@@ -247,9 +253,12 @@ func (s *Sidebar) layoutTabItem(
 	paint.FillShape(gtx.Ops, bgCol, clip.Rect{Max: image.Pt(width, height)}.Op())
 	call.Add(gtx.Ops)
 
-	// Горизонтальный разделитель снизу вкладки
-	sepColor := blendColor(ColorTitleBar, 8)
-	drawFilledRect(gtx.Ops, 0, height-gtx.Dp(unit.Dp(1)), width, gtx.Dp(unit.Dp(1)), sepColor)
+	// Горизонтальные разделители для выделения активной вкладки
+	if isActive {
+		sepColor := blendColor(ColorTitleBar, 8)
+		drawFilledRect(gtx.Ops, 0, 0, width, gtx.Dp(unit.Dp(1)), sepColor)
+		drawFilledRect(gtx.Ops, 0, height-gtx.Dp(unit.Dp(1)), width, gtx.Dp(unit.Dp(1)), sepColor)
+	}
 
 	return dims, clicked, closed
 }

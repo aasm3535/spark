@@ -17,4 +17,7 @@ type PTY interface {
 
 	// Close terminates the child process and releases all resources.
 	Close() error
+
+	// Pid returns the process ID of the spawned shell/process.
+	Pid() int
 }

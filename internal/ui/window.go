@@ -101,7 +101,11 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 							descriptions := make([]string, len(win.tabs))
 							for i, t := range win.tabs {
 								titles[i] = t.term.Title()
-								descriptions[i] = t.term.LastLine()
+								if agent := t.CheckActiveAgent(); agent != "" {
+									descriptions[i] = "🤖 " + agent + " (Running)"
+								} else {
+									descriptions[i] = t.term.LastLine()
+								}
 							}
 
 							// Синхронизируем вкладки в боковой панели

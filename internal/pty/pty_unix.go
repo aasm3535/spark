@@ -64,6 +64,13 @@ func (p *unixPTY) Close() error {
 	return err
 }
 
+func (p *unixPTY) Pid() int {
+	if p.cmd.Process != nil {
+		return p.cmd.Process.Pid
+	}
+	return 0
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // DefaultShell returns the short shell name for display purposes (e.g. "zsh").
