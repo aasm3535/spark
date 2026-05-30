@@ -24,6 +24,7 @@ const (
 	ActionCopyText
 	ActionPaste
 	ActionSTT
+	ActionToggleSidebar
 )
 
 // String returns a human-readable name for the action.
@@ -55,6 +56,8 @@ func (a Action) String() string {
 		return "paste"
 	case ActionSTT:
 		return "stt"
+	case ActionToggleSidebar:
+		return "toggle_sidebar"
 	default:
 		return "none"
 	}
@@ -93,6 +96,7 @@ func NewBindingManager(cfg *Config) *BindingManager {
 		{kb.CopyText, ActionCopyText},
 		{kb.Paste, ActionPaste},
 		{kb.STT, ActionSTT},
+		{kb.ToggleSidebar, ActionToggleSidebar},
 	}
 
 	bm := &BindingManager{}

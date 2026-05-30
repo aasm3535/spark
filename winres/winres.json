@@ -1,13 +1,7 @@
 {
   "RT_GROUP_ICON": {
     "#1": {
-      "0409": [
-        "../assets/icon_256.png",
-        "../assets/icon_128.png",
-        "../assets/icon_64.png",
-        "../assets/icon_32.png",
-        "../assets/icon_16.png"
-      ]
+      "0409": "../assets/spark.ico"
     }
   },
   "RT_MANIFEST": {

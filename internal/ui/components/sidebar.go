@@ -48,6 +48,7 @@ func (s *Sidebar) Layout(
 	activeIdx int,
 	titles []string,
 	descriptions []string,
+	branches []string,
 	sttRecording bool,
 	sttTranscribing bool,
 ) (layout.Dimensions, SidebarResult) {
@@ -151,8 +152,12 @@ func (s *Sidebar) Layout(
 				tabChildren = append(tabChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					isRecordingTab := isActive && sttRecording
 					isTranscribingTab := isActive && sttTranscribing
+					branch := ""
+					if i < len(branches) {
+						branch = branches[i]
+					}
 					dims, clicked, closed := s.layoutTabItem(
-						gtx, th, tab, title, desc, isActive, i == 0,
+						gtx, th, tab, title, desc, branch, isActive, i == 0,
 						isRecordingTab, isTranscribingTab,
 					)
 					if clicked {
@@ -195,6 +200,7 @@ func (s *Sidebar) layoutTabItem(
 	tab *TabState,
 	title string,
 	desc string,
+	branch string,
 	isActive bool,
 	isFirst bool,
 	isRecording bool,
@@ -248,24 +254,32 @@ func (s *Sidebar) layoutTabItem(
 							return lbl.Layout(gtx)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if desc == "" {
-								desc = "no activity"
+							// Show git branch if available, otherwise description
+							subtext := desc
+							if branch != "" {
+								subtext = branch
 							}
-							lbl := material.Label(th, unit.Sp(9.5), desc)
+							if subtext == "" {
+								subtext = "idle"
+							}
+							lbl := material.Label(th, unit.Sp(9.5), subtext)
 							lbl.Font.Typeface = "Segoe UI, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, DejaVu Sans, Segoe UI Symbol, sans-serif"
 							isAgent := false
 							for _, r := range []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'} {
-								if strings.HasPrefix(desc, string(r)) {
+								if strings.HasPrefix(subtext, string(r)) {
 									isAgent = true
 									break
 								}
 							}
-							if strings.Contains(desc, "Claude Code") ||
-								strings.Contains(desc, "Opencode") ||
-								strings.Contains(desc, "Pi") {
+							if strings.Contains(subtext, "Claude Code") ||
+								strings.Contains(subtext, "Opencode") ||
+								strings.Contains(subtext, "Pi") {
 								isAgent = true
 							}
-							if isAgent {
+							if branch != "" {
+								// Git branch — accent color
+								lbl.Color = blendColor(ColorTitleText, 25)
+							} else if isAgent {
 								lbl.Color = ColorText
 								lbl.Font.Weight = font.Medium
 							} else {
@@ -372,5 +386,3 @@ func (s *Sidebar) layoutFooterButton(gtx layout.Context, th *material.Theme, cli
 
 	return layout.Dimensions{Size: image.Pt(availW, availH)}
 }
-
-

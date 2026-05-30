@@ -50,6 +50,7 @@ type Keybinds struct {
 	CopyText       string `json:"copy_text"`
 	Paste          string `json:"paste"`
 	STT            string `json:"stt"`
+	ToggleSidebar  string `json:"toggle_sidebar"`
 }
 
 // DefaultKeybinds returns the built-in key bindings.
@@ -68,6 +69,7 @@ func DefaultKeybinds() Keybinds {
 		CopyText:       "Ctrl+Shift+C",
 		Paste:          "Ctrl+Shift+V",
 		STT:            "Ctrl+Shift+H",
+		ToggleSidebar:  "Ctrl+Shift+B",
 	}
 }
 
@@ -112,6 +114,9 @@ func (d Keybinds) Merge(o Keybinds) Keybinds {
 	}
 	if o.STT != "" {
 		d.STT = o.STT
+	}
+	if o.ToggleSidebar != "" {
+		d.ToggleSidebar = o.ToggleSidebar
 	}
 	return d
 }

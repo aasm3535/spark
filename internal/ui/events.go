@@ -3,7 +3,6 @@ package ui
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,8 +41,8 @@ func buildFilters(tag *struct{}, bm *config.BindingManager) []event.Filter {
 			ScrollY: pointer.ScrollRange{Min: -1000000, Max: 1000000},
 		},
 		pointer.Filter{
-			Target:  tag,
-			Kinds:   pointer.Press | pointer.Release | pointer.Move | pointer.Drag,
+			Target: tag,
+			Kinds:  pointer.Press | pointer.Release | pointer.Move | pointer.Drag,
 		},
 		key.FocusFilter{Target: tag},
 		transfer.TargetFilter{Target: tag, Type: "text/plain"},
@@ -200,6 +199,16 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				continue
 			}
 
+			// Skip regular printable characters - they come via EditEvent
+			// Only process special keys and Ctrl+letter combinations
+			if len(e.Name) == 1 && !e.Modifiers.Contain(key.ModCtrl) {
+				continue
+			}
+			// Space is handled by EditEvent, skip it here unless Ctrl is pressed
+			if e.Name == key.NameSpace && !e.Modifiers.Contain(key.ModCtrl) {
+				continue
+			}
+
 			if action := win.bindings.Resolve(e); action != config.ActionNone {
 				win.handleAction(gtx, action)
 				continue
@@ -215,21 +224,30 @@ func (win *Window) handleEvents(gtx layout.Context) {
 				continue
 			}
 
+			// Handle Enter to add command to history
+			if e.Name == key.NameReturn {
+				cmd := active.term.CurrentInputLine("")
+				if cmd != "" {
+					active.term.AddToHistory(cmd)
+				}
+			}
+
 			b := terminal.KeyToBytes(e, active.term.AppCursorKeys())
 			if len(b) > 0 {
 				active.term.Scroll(-999999)
 				active.pty.Write(b) //nolint:errcheck
+				win.w.Invalidate()
 			}
 
 		case key.EditEvent:
 			if win.searchActive {
 				continue
 			}
-			if active.pty != nil && e.Text != " " {
+			if active.pty != nil && len(e.Text) > 0 {
 				active.term.Scroll(-999999)
 				if active.term.BracketedPaste() && len(e.Text) > 1 {
 					active.pty.Write([]byte("\x1b[200~")) //nolint:errcheck
-					active.pty.Write([]byte(e.Text)) //nolint:errcheck
+					active.pty.Write([]byte(e.Text))      //nolint:errcheck
 					active.pty.Write([]byte("\x1b[201~")) //nolint:errcheck
 				} else {
 					active.pty.Write([]byte(e.Text)) //nolint:errcheck
@@ -251,7 +269,7 @@ func (win *Window) handleEvents(gtx layout.Context) {
 					active.term.Scroll(-999999)
 					if active.term.BracketedPaste() {
 						active.pty.Write([]byte("\x1b[200~")) //nolint:errcheck
-						active.pty.Write(data) //nolint:errcheck
+						active.pty.Write(data)                //nolint:errcheck
 						active.pty.Write([]byte("\x1b[201~")) //nolint:errcheck
 					} else {
 						active.pty.Write(data) //nolint:errcheck
@@ -273,7 +291,7 @@ func (win *Window) processSTTResults() {
 			win.sttCancel = nil
 
 			if result.err != nil {
-				win.ShowToast(fmt.Sprintf("STT Error: %v", result.err))
+				showErrorf("Spark — STT Error", "%v", result.err)
 			} else {
 				text := strings.TrimSpace(result.text)
 				if text != "" {
@@ -349,12 +367,16 @@ func (win *Window) handleAction(gtx layout.Context, action config.Action) {
 					Type: "application/text",
 					Data: io.NopCloser(bytes.NewReader([]byte(text))),
 				})
-				win.ShowToast("Copied to clipboard")
+				// Copied — no feedback needed
 			}
 		}
 
 	case config.ActionPaste:
 		gtx.Execute(clipboard.ReadCmd{Tag: &win.inputTag})
+
+	case config.ActionToggleSidebar:
+		win.sidebarActive = !win.sidebarActive
+		win.w.Invalidate()
 
 	case config.ActionSTT:
 		active := win.active()
@@ -374,7 +396,7 @@ func (win *Window) handleAction(gtx layout.Context, action config.Action) {
 			err := win.sttRecorder.Stop(wavPath)
 			if err != nil {
 				win.sttTranscribing = false
-				win.ShowToast(fmt.Sprintf("Failed to stop recording: %v", err))
+				showErrorf("Spark — STT", "Failed to stop recording: %v", err)
 				win.w.Invalidate()
 				break
 			}
@@ -402,19 +424,19 @@ func (win *Window) handleAction(gtx layout.Context, action config.Action) {
 				win.sttCancel()
 			}
 			win.sttTranscribing = false
-			win.ShowToast("Transcription cancelled")
+			// Cancelled — no feedback needed
 			win.w.Invalidate()
 		} else {
 			// Start recording
 			if win.config.STT.APIKey == "" {
-				win.ShowToast("STT API key is empty! Set stt.api_key in ~/.spark/config.json")
+				showError("Spark — STT", "API key is empty! Set stt.api_key in ~/.spark/config.json")
 				break
 			}
 
 			win.sttRecorder = stt.NewRecorder()
 			err := win.sttRecorder.Start()
 			if err != nil {
-				win.ShowToast(fmt.Sprintf("Failed to record: %v", err))
+				showErrorf("Spark — STT", "Failed to record: %v", err)
 				break
 			}
 

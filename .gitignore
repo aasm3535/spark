@@ -19,6 +19,6 @@ nul
 opencode_out.txt
 spark_stderr.txt
 
-# Unrelated projects
-.commandcode/
-ZoAPI/
+# Build output
+builds/
+*.syso

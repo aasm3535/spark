@@ -2,8 +2,11 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"image/color"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"gioui.org/app"
 	"gioui.org/io/key"
@@ -35,17 +38,16 @@ type Window struct {
 	renderer components.Renderer
 	cmdPal   components.CommandPalette
 	search   components.SearchBar
-	toast    components.Toast
 
 	tabs      []*Tab
 	activeTab int
 
-	inputTag     struct{}
-	focused       bool
-	cmdActive     bool
-	searchActive  bool
-	sidebarActive bool
-	sidebarWidth  unit.Dp
+	inputTag         struct{}
+	focused          bool
+	cmdActive        bool
+	searchActive     bool
+	sidebarActive    bool
+	sidebarWidth     unit.Dp
 	sidebarAnimWidth float32
 	sidebarDragging  bool
 
@@ -138,9 +140,11 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 							// Собираем заголовки и описания вкладок
 							titles := make([]string, len(win.tabs))
 							descriptions := make([]string, len(win.tabs))
+							branches := make([]string, len(win.tabs))
 							anyAgentActive := false
 							for i, t := range win.tabs {
 								titles[i] = t.term.Title()
+								branches[i] = t.term.GitBranch()
 								if agent := t.CheckActiveAgent(); agent != "" {
 									isWorking := t.IsAgentWorking(agent)
 
@@ -184,6 +188,7 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 								win.activeTab,
 								titles,
 								descriptions,
+								branches,
 								win.sttRecording,
 								win.sttTranscribing,
 							)
@@ -277,8 +282,6 @@ func (win *Window) Layout(gtx layout.Context, w *app.Window) layout.Dimensions {
 				}
 			}
 
-			win.toast.Layout(gtx, win.theme)
-
 			return dims
 		}),
 	)
@@ -302,13 +305,22 @@ func (win *Window) changeFontSize(delta float32) {
 	win.w.Invalidate()
 }
 
-// ShowToast displays a temporary message at the bottom of the window.
-func (win *Window) ShowToast(msg string) {
-	win.toast.Show(msg, 2*time.Second)
-	win.w.Invalidate()
-	time.AfterFunc(2*time.Second, func() {
-		win.w.Invalidate()
-	})
+var (
+	user32          = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW = user32.NewProc("MessageBoxW")
+)
+
+// showError shows a Windows system error dialog.
+func showError(title, message string) {
+	t, _ := syscall.UTF16PtrFromString(title)
+	m, _ := syscall.UTF16PtrFromString(message)
+	// MB_OK = 0, MB_ICONERROR = 0x10
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), 0x10)
+}
+
+// showErrorf shows a formatted Windows system error dialog.
+func showErrorf(title, format string, args ...any) {
+	showError(title, fmt.Sprintf(format, args...))
 }
 
 // ensure system is used

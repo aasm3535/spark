@@ -331,15 +331,25 @@ func drawBoxDrawing(gtx layout.Context, ch rune, col color.NRGBA, cw, chH int) b
 	midY := chH / 2
 
 	drawRect := func(x1, y1, x2, y2 int) {
-		if x1 < 0 { x1 = 0 }
-		if y1 < 0 { y1 = 0 }
-		if x2 > cw { x2 = cw }
-		if y2 > chH { y2 = chH }
-		if x1 >= x2 || y1 >= y2 { return }
+		if x1 < 0 {
+			x1 = 0
+		}
+		if y1 < 0 {
+			y1 = 0
+		}
+		if x2 > cw {
+			x2 = cw
+		}
+		if y2 > chH {
+			y2 = chH
+		}
+		if x1 >= x2 || y1 >= y2 {
+			return
+		}
 		paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(x1, y1, x2, y2)).Op())
 	}
 
-		// 1. LEFT
+	// 1. LEFT
 	switch style.left {
 	case 1:
 		yMin := midY - tLight/2
@@ -404,20 +414,40 @@ func drawBoxDrawing(gtx layout.Context, ch rune, col color.NRGBA, cw, chH int) b
 
 func drawBlockElement(gtx layout.Context, ch rune, col color.NRGBA, cw, chH int) bool {
 	drawRect := func(x1, y1, x2, y2 int) {
-		if x1 < 0 { x1 = 0 }
-		if y1 < 0 { y1 = 0 }
-		if x2 > cw { x2 = cw }
-		if y2 > chH { y2 = chH }
-		if x1 >= x2 || y1 >= y2 { return }
+		if x1 < 0 {
+			x1 = 0
+		}
+		if y1 < 0 {
+			y1 = 0
+		}
+		if x2 > cw {
+			x2 = cw
+		}
+		if y2 > chH {
+			y2 = chH
+		}
+		if x1 >= x2 || y1 >= y2 {
+			return
+		}
 		paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(x1, y1, x2, y2)).Op())
 	}
 
 	drawRectAlpha := func(x1, y1, x2, y2 int, alpha uint8) {
-		if x1 < 0 { x1 = 0 }
-		if y1 < 0 { y1 = 0 }
-		if x2 > cw { x2 = cw }
-		if y2 > chH { y2 = chH }
-		if x1 >= x2 || y1 >= y2 { return }
+		if x1 < 0 {
+			x1 = 0
+		}
+		if y1 < 0 {
+			y1 = 0
+		}
+		if x2 > cw {
+			x2 = cw
+		}
+		if y2 > chH {
+			y2 = chH
+		}
+		if x1 >= x2 || y1 >= y2 {
+			return
+		}
 		c := col
 		c.A = uint8(uint32(c.A) * uint32(alpha) / 255)
 		paint.FillShape(gtx.Ops, c, clip.Rect(image.Rect(x1, y1, x2, y2)).Op())
@@ -523,23 +553,49 @@ func drawBraillePattern(gtx layout.Context, ch rune, col color.NRGBA, cw, chH in
 		y1_coord := y - dotSize/2
 		y2_coord := y1_coord + dotSize
 
-		if x1 < 0 { x1 = 0 }
-		if y1_coord < 0 { y1_coord = 0 }
-		if x2 > cw { x2 = cw }
-		if y2_coord > chH { y2_coord = chH }
-		if x1 >= x2 || y1_coord >= y2_coord { return }
+		if x1 < 0 {
+			x1 = 0
+		}
+		if y1_coord < 0 {
+			y1_coord = 0
+		}
+		if x2 > cw {
+			x2 = cw
+		}
+		if y2_coord > chH {
+			y2_coord = chH
+		}
+		if x1 >= x2 || y1_coord >= y2_coord {
+			return
+		}
 
 		paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(x1, y1_coord, x2, y2_coord)).Op())
 	}
 
-	if offset&0x01 != 0 { drawDot(leftX, y1) }
-	if offset&0x02 != 0 { drawDot(leftX, y2) }
-	if offset&0x04 != 0 { drawDot(leftX, y3) }
-	if offset&0x08 != 0 { drawDot(rightX, y1) }
-	if offset&0x10 != 0 { drawDot(rightX, y2) }
-	if offset&0x20 != 0 { drawDot(rightX, y3) }
-	if offset&0x40 != 0 { drawDot(leftX, y4) }
-	if offset&0x80 != 0 { drawDot(rightX, y4) }
+	if offset&0x01 != 0 {
+		drawDot(leftX, y1)
+	}
+	if offset&0x02 != 0 {
+		drawDot(leftX, y2)
+	}
+	if offset&0x04 != 0 {
+		drawDot(leftX, y3)
+	}
+	if offset&0x08 != 0 {
+		drawDot(rightX, y1)
+	}
+	if offset&0x10 != 0 {
+		drawDot(rightX, y2)
+	}
+	if offset&0x20 != 0 {
+		drawDot(rightX, y3)
+	}
+	if offset&0x40 != 0 {
+		drawDot(leftX, y4)
+	}
+	if offset&0x80 != 0 {
+		drawDot(rightX, y4)
+	}
 
 	return true
 }

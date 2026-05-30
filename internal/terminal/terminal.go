@@ -3,6 +3,9 @@ package terminal
 import (
 	"fmt"
 	"image/color"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -43,16 +46,13 @@ type Terminal struct {
 	bgColor color.NRGBA
 	bold    bool
 
-	// escape-sequence parser
 	inEscape bool
 	escBuf   strings.Builder
 
-	// alternate screen
 	altScreen        [][]Cell
 	altCurX, altCurY int
 	inAlt            bool
 
-	// Search
 	searchQuery   string
 	searchResults []Match
 
@@ -64,28 +64,27 @@ type Terminal struct {
 	lineWrap   bool
 	originMode bool
 
-	// Mouse tracking
 	mouseTracking int
 	mouseSGR      bool
 
-	// Bracketed paste mode
 	bracketedPaste bool
 
-	// Focus events
 	focusEvents bool
 
-	// Text selection
 	selStart  SelPos
 	selEnd    SelPos
 	selecting bool
 
-	// PTY writer for sending responses
 	ptyWriter func([]byte)
 
 	inv Invalidator
 
-	// Заголовок окна (OSC 0/2)
 	title string
+
+	cmdHistory []string
+
+	workingDir string // from OSC 7
+	gitBranch  string // detected from .git/HEAD
 }
 
 type SelPos struct {
@@ -158,7 +157,6 @@ func (t *Terminal) makeEraseLine(cols int) []Cell {
 	return line
 }
 
-
 // ─── Snapshot (for renderer) ──────────────────────────────────────────────────
 
 // SearchHighlight defines a region in the terminal to highlight.
@@ -177,6 +175,8 @@ type Snapshot struct {
 	SelStart      SelPos
 	SelEnd        SelPos
 	HasSelection  bool
+	WorkingDir    string
+	GitBranch     string
 }
 
 // Snapshot returns a deep copy of the current screen state, safe to read
@@ -197,6 +197,8 @@ func (t *Terminal) Snapshot() Snapshot {
 		SelStart:      t.selStart,
 		SelEnd:        t.selEnd,
 		HasSelection:  t.selStart != t.selEnd,
+		WorkingDir:    t.workingDir,
+		GitBranch:     t.gitBranch,
 	}
 
 	if t.scrollOffset > 0 {
@@ -1162,11 +1164,34 @@ func (t *Terminal) Title() string {
 	return t.title
 }
 
+func (t *Terminal) AddToHistory(cmd string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return
+	}
+
+	for i, existing := range t.cmdHistory {
+		if existing == cmd {
+			t.cmdHistory = append(t.cmdHistory[:i], t.cmdHistory[i+1:]...)
+			break
+		}
+	}
+
+	t.cmdHistory = append([]string{cmd}, t.cmdHistory...)
+
+	if len(t.cmdHistory) > 100 {
+		t.cmdHistory = t.cmdHistory[:100]
+	}
+}
+
 // parseOSC разбирает команды OSC (например, изменение заголовка)
 func (t *Terminal) parseOSC(s string) {
 	// Убираем ESC ] в начале
 	payload := s[2:]
-	
+
 	// Убираем маркер конца последовательности
 	if strings.HasSuffix(payload, "\x07") {
 		payload = payload[:len(payload)-1]
@@ -1179,25 +1204,36 @@ func (t *Terminal) parseOSC(s string) {
 	if len(parts) == 2 {
 		cmd := parts[0]
 		val := parts[1]
-		if cmd == "0" || cmd == "2" {
+		switch cmd {
+		case "0", "2":
 			t.title = cleanTitle(val)
+		case "7":
+			// OSC 7: working directory — file://host/path or raw path
+			dir := val
+			if strings.HasPrefix(dir, "file://") {
+				u, err := url.Parse(dir)
+				if err == nil {
+					dir = u.Path
+				}
+			}
+			if dir != "" {
+				t.workingDir = dir
+				t.gitBranch = detectGitBranch(dir)
+			}
 		}
 	}
 }
 
 // cleanTitle очищает и форматирует имя процесса/заголовка
 func cleanTitle(title string) string {
-	// Убираем пути в Windows и Unix стиле
 	title = strings.ReplaceAll(title, "\\", "/")
 	if idx := strings.LastIndex(title, "/"); idx != -1 {
 		title = title[idx+1:]
 	}
-	// Убираем расширение .exe
 	if strings.HasSuffix(strings.ToLower(title), ".exe") {
 		title = title[:len(title)-4]
 	}
-	
-	// Красиво форматируем популярные оболочки
+
 	switch strings.ToLower(title) {
 	case "powershell":
 		return "PowerShell"
@@ -1209,11 +1245,69 @@ func cleanTitle(title string) string {
 	return title
 }
 
+// detectGitBranch reads .git/HEAD to determine the current branch.
+// Returns empty string if not in a git repo.
+func detectGitBranch(dir string) string {
+	headPath := dir + "/.git/HEAD"
+	data, err := os.ReadFile(headPath)
+	if err != nil {
+		// Check parent directories
+		for i := 0; i < 10; i++ {
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			headPath = parent + "/.git/HEAD"
+			data, err = os.ReadFile(headPath)
+			if err == nil {
+				break
+			}
+			dir = parent
+		}
+		if err != nil {
+			return ""
+		}
+	}
+	ref := strings.TrimSpace(string(data))
+	if strings.HasPrefix(ref, "ref: refs/heads/") {
+		return strings.TrimPrefix(ref, "ref: refs/heads/")
+	}
+	// Detached HEAD — return short hash
+	if len(ref) > 7 {
+		return ref[:7]
+	}
+	return ref
+}
+
+// WorkingDir returns the current working directory (from OSC 7).
+func (t *Terminal) WorkingDir() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.workingDir
+}
+
+// GitBranch returns the current git branch name.
+func (t *Terminal) GitBranch() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.gitBranch
+}
+
+// SetWorkingDir sets the working directory and updates git branch.
+func (t *Terminal) SetWorkingDir(dir string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if dir != "" {
+		t.workingDir = dir
+		t.gitBranch = detectGitBranch(dir)
+	}
+}
+
 // LastLine возвращает последнюю непустую строку для описания в табе
 func (t *Terminal) LastLine() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	for r := len(t.screen) - 1; r >= 0; r-- {
 		var sb strings.Builder
 		for _, cell := range t.screen[r] {

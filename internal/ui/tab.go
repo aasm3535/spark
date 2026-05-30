@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"os"
 	"strings"
 	"time"
 
 	"gioui.org/io/system"
 	"gioui.org/widget"
+	"github.com/shirou/gopsutil/v3/process"
 	sparkpty "yutug.lol/spark/internal/pty"
 	"yutug.lol/spark/internal/terminal"
 	"yutug.lol/spark/internal/ui/components"
@@ -53,6 +55,33 @@ func (win *Window) newTab() error {
 	}
 	win.tabs = append(win.tabs, tab)
 	win.activeTab = len(win.tabs) - 1
+
+	// Set initial working directory from current OS dir
+	if cwd, err := os.Getwd(); err == nil {
+		term.SetWorkingDir(cwd)
+	}
+
+	// Background goroutine: poll shell process CWD every 2 seconds
+	// to track cd changes without injecting any visible script.
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if tab.closed {
+				return
+			}
+			pid := p.Pid()
+			if pid == 0 {
+				continue
+			}
+
+			// Try the PTY process itself
+			cwd := pollCwd(int32(pid))
+			if cwd != "" {
+				term.SetWorkingDir(cwd)
+			}
+		}
+	}()
 
 	// Feed PTY output into the terminal buffer.
 	go func() {
@@ -196,4 +225,33 @@ func (t *Tab) IsAgentWorking(agent string) bool {
 		return true
 	}
 	return t.term.IsAgentWorking(agent)
+}
+
+// pollCwd tries to read the current working directory of a process
+// by checking the process itself and its children.
+func pollCwd(pid int32) string {
+	proc, err := process.NewProcess(pid)
+	if err != nil {
+		return ""
+	}
+
+	// Try the process itself
+	cwd, err := proc.Cwd()
+	if err == nil && cwd != "" {
+		return cwd
+	}
+
+	// Try child processes (shell is often a child of conpty)
+	children, err := proc.Children()
+	if err != nil {
+		return ""
+	}
+	for _, child := range children {
+		cwd, err := child.Cwd()
+		if err == nil && cwd != "" {
+			return cwd
+		}
+	}
+
+	return ""
 }
